@@ -96,4 +96,3 @@ export class AutoRefreshCache<T> {
     this.isRunning = false
   }
 }
-

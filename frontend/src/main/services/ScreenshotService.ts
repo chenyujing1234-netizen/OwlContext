@@ -5,9 +5,11 @@ import { app, desktopCapturer, shell, systemPreferences } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getLogger } from '@shared/logger/main'
-import { isMac } from '@main/constant'
+import { isDev, isMac } from '@main/constant'
 import { getCacheDir } from '@main/utils/file'
 import { CaptureSourcesTools } from '@main/utils/get-capture-sources'
+import dayjs, { Dayjs } from 'dayjs'
+import { get } from 'lodash'
 
 const logger = getLogger('ScreenshotService')
 
@@ -48,47 +50,53 @@ class ScreenshotService extends CaptureSourcesTools {
    * @returns {Promise<{ success: boolean; filePath?: string; error?: string }>} - Returns the file path if the operation is successful, otherwise returns an error message.
    */
   async takeScreenshot(
-    groupIntervalTime: string,
-    sourceId: string
-  ): Promise<{ success: boolean; screenshotInfo?: { url: string; date: string; timestamp: number }; error?: string }> {
+    sourceId: string,
+    batchTime: Dayjs
+    // groupIntervalTime?: string,
+  ): Promise<{ success: boolean; screenshotInfo?: { url: string }; error?: string }> {
     try {
       const res = await this.takeSourceScreenshotTools(sourceId)
       if (res.success) {
         const source = res.source as any
         const thumbnail = source.thumbnail
         if (!thumbnail || thumbnail.isEmpty()) {
-          logger.info(`[ScreenshotService] Skipping invalid thumbnail source`, source)
+          logger.warn(`Skipping invalid thumbnail source`, source)
+          return { success: false, error: 'Invalid thumbnail source' }
         }
 
-        const pngBuffer = thumbnail.toPNG()
-        if (pngBuffer.length === 0) {
-          logger.info(`[ScreenshotService] Thumbnail is an empty buffer: ${source.name}`)
+        const image = thumbnail.toPNG()
+        if (image.length === 0) {
+          logger.info(`Thumbnail is an empty buffer: ${source.name}`)
+          return { success: false, error: 'Empty thumbnail buffer' }
         }
-
-        const image = source.thumbnail.toPNG()
-        // logger.info(
-        //   `[ScreenshotService] start Screenshot image size: ---***${dayjs().format('YYYY-MM-DD HH:mm:ss')}***--- ${image.length}`
-        // )
+        const timestamp = batchTime || dayjs()
         const userDataPath = app.getPath('userData')
-        const today = new Date()
-        const dateString = today.toISOString().slice(0, 10).replace(/-/g, '')
-        const timestamp = Date.now()
-        const activityPath = path.join(
-          userDataPath,
-          'Data',
-          'screenshot',
-          'activity',
-          dateString,
-          `${groupIntervalTime}-${sourceId.split(':').join('-')}`
-        )
+        const time = timestamp.format('YYYY-MM-DD')
+        const currentTime = timestamp.format('HH-mm-ss')
+        // const timestamp = dayjs().valueOf()
+        const appName = get(source, 'sourceName', sourceId.split(':').join('-'))
+        const activityPath = !isDev
+          ? path.join(userDataPath, 'Data', 'screenshot', 'activity', time, currentTime)
+          : path.join(process.cwd(), 'backend', 'screenshot', 'activity', time, currentTime)
+        console.log(activityPath)
         await fs.promises.mkdir(activityPath, { recursive: true })
-        const filePath = path.join(activityPath, `${timestamp}.png`)
+        const filePath = path.join(
+          activityPath,
+          `${appName === sourceId.split(':').join('-') ? appName : sourceId.split(':').join('-')}-${appName}.png`
+        )
         await fs.promises.writeFile(filePath, image)
-        await fs.promises.access(filePath)
+        // let base64 = ''
+        // try {
+        //   base64 = `data:image/png;base64,${image.toString('base64')}`
+        // } catch (error) {
+        //   logger.warn('takeScreenshot error', error)
+        // }
+
         const screenshotInfo = {
-          url: filePath,
-          date: dateString,
-          timestamp: timestamp
+          url: filePath
+          // date: dateString,
+          // timestamp: timestamp
+          // base64: base64 ? base64 : null
         }
         // logger.info(
         //   `[ScreenshotService] end Screenshot taken: ---***${dayjs().format('YYYY-MM-DD HH:mm:ss')}***--- ${filePath}`
@@ -111,7 +119,7 @@ class ScreenshotService extends CaptureSourcesTools {
   async getScreenshotsByDate(date?: string): Promise<{ success: boolean; screenshots?: any[]; error?: string }> {
     try {
       const userDataPath = app.getPath('userData')
-      const dateString = date || new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const dateString = date || dayjs().format('YYYYMMDD')
       const activityPath = path.join(userDataPath, 'Data', 'screenshot', 'activity', dateString)
 
       // Check if the directory exists
@@ -154,7 +162,7 @@ class ScreenshotService extends CaptureSourcesTools {
                 timestamp: timestamp,
                 image_url: filePath,
                 description: 'Historical screenshot',
-                created_at: stats.birthtime.toISOString(),
+                created_at: dayjs(stats.birthtime).toISOString(),
                 group_id: groupIntervalTime // Group ID parsed from the path
               })
             }
@@ -188,7 +196,7 @@ class ScreenshotService extends CaptureSourcesTools {
         throw new Error(`Source with id ${sourceId} not found.`)
       }
       const image = source.thumbnail.toPNG()
-      const filePath = path.join(getCacheDir(), `screenshot-source-${Date.now()}.png`)
+      const filePath = path.join(getCacheDir(), `screenshot-source-${dayjs().valueOf()}.png`)
       await fs.promises.writeFile(filePath, image)
       return { success: true, filePath }
     } catch (error: any) {
@@ -266,7 +274,9 @@ class ScreenshotService extends CaptureSourcesTools {
    * @param {number} retentionDays - Retention period in days, default is 15 days
    * @returns {Promise<{ success: boolean; deletedCount?: number; error?: string }>}
    */
-  async cleanupOldScreenshots(retentionDays: number = 15): Promise<{ success: boolean; deletedCount?: number; deletedSize?: number; error?: string }> {
+  async cleanupOldScreenshots(
+    retentionDays: number = 15
+  ): Promise<{ success: boolean; deletedCount?: number; deletedSize?: number; error?: string }> {
     try {
       const userDataPath = app.getPath('userData')
       const screenshotBasePath = path.join(userDataPath, 'Data', 'screenshot', 'activity')
@@ -278,9 +288,8 @@ class ScreenshotService extends CaptureSourcesTools {
       }
 
       // Calculate cutoff date (current date - retention days)
-      const cutoffDate = new Date()
-      cutoffDate.setDate(cutoffDate.getDate() - retentionDays)
-      const cutoffDateString = cutoffDate.toISOString().slice(0, 10).replace(/-/g, '')
+      const cutoffDate = dayjs().subtract(retentionDays, 'day')
+      const cutoffDateString = cutoffDate.format('YYYYMMDD')
 
       logger.info(`Starting cleanup of screenshots older than ${retentionDays} days (before ${cutoffDateString})`)
 
@@ -295,8 +304,12 @@ class ScreenshotService extends CaptureSourcesTools {
 
         const dateDirName = dateDir.name
 
+        // Normalize directory name to YYYYMMDD format for comparison
+        // Support both YYYY-MM-DD and YYYYMMDD formats
+        const normalizedDirName = dateDirName.replace(/-/g, '')
+
         // Check if date is earlier than cutoff date
-        if (dateDirName < cutoffDateString) {
+        if (normalizedDirName < cutoffDateString) {
           const dateDirPath = path.join(screenshotBasePath, dateDirName)
 
           try {
@@ -314,7 +327,9 @@ class ScreenshotService extends CaptureSourcesTools {
         }
       }
 
-      logger.info(`Cleanup completed. Deleted ${deletedCount} directories, freed ${(deletedSize / 1024 / 1024).toFixed(2)} MB`)
+      logger.info(
+        `Cleanup completed. Deleted ${deletedCount} directories, freed ${(deletedSize / 1024 / 1024).toFixed(2)} MB`
+      )
       return { success: true, deletedCount, deletedSize }
     } catch (error: any) {
       logger.error('Failed to cleanup old screenshots:', error)

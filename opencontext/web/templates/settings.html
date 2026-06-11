@@ -1,0 +1,665 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">系统设置</h1>
+    </div>
+
+    <!-- 数据目录信息 -->
+    <div class="alert alert-info d-flex align-items-center mb-3" role="alert">
+        <i class="bi bi-folder2-open me-2" style="font-size: 1.2rem;"></i>
+        <div>
+            <strong>数据目录 (CONTEXT_PATH):</strong>
+            <span id="contextPathDisplay" class="font-monospace ms-2">加载中...</span>
+            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="copyContextPath()" title="复制路径">
+                <i class="bi bi-clipboard"></i>
+            </button>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs" id="settingsTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="model-tab" data-bs-toggle="tab" data-bs-target="#model" type="button" role="tab">
+                <i class="bi bi-cpu"></i> 模型配置
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="capture-tab" data-bs-toggle="tab" data-bs-target="#capture" type="button" role="tab">
+                <i class="bi bi-camera"></i> 截图捕获
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="processing-tab" data-bs-toggle="tab" data-bs-target="#processing" type="button" role="tab">
+                <i class="bi bi-gear"></i> 处理配置
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="generation-tab" data-bs-toggle="tab" data-bs-target="#generation" type="button" role="tab">
+                <i class="bi bi-robot"></i> 内容生成
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="prompts-tab" data-bs-toggle="tab" data-bs-target="#prompts" type="button" role="tab">
+                <i class="bi bi-code-square"></i> Prompts管理
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="settingsTabContent">
+        <!-- 模型配置 -->
+        <div class="tab-pane fade show active" id="model" role="tabpanel">
+            <div class="row mt-4">
+                <div class="col-md-8">
+                    <h4>LLM 模型配置</h4>
+                    <form id="modelForm">
+                        <div class="mb-3">
+                            <label for="modelPlatform" class="form-label">模型平台</label>
+                            <select class="form-select" id="modelPlatform" required>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="doubao">豆包</option>
+                                <option value="qwen">通义千问</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="modelId" class="form-label">模型 ID</label>
+                            <input type="text" class="form-control" id="modelId" placeholder="例如: gpt-5" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="baseUrl" class="form-label">Base URL</label>
+                            <input type="text" class="form-control" id="baseUrl" placeholder="例如: https://api.openai.com/v1" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="apiKey" class="form-label">API Key</label>
+                            <input type="password" class="form-control" id="apiKey" required>
+                        </div>
+
+                        <h4 class="mt-4">Embedding 模型配置</h4>
+                        <div class="mb-3">
+                            <label for="embeddingModelId" class="form-label">Embedding 模型 ID</label>
+                            <input type="text" class="form-control" id="embeddingModelId" placeholder="例如: text-embedding-ada-002" required>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="separateEmbedding" onchange="toggleEmbeddingConfig()">
+                            <label class="form-check-label" for="separateEmbedding">使用独立的 Embedding 配置</label>
+                        </div>
+                        <div id="embeddingConfigSection" style="display: none;">
+                            <div class="mb-3">
+                                <label for="embeddingModelPlatform" class="form-label">Embedding 平台</label>
+                                <select class="form-select" id="embeddingModelPlatform">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="doubao">豆包</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="embeddingBaseUrl" class="form-label">Embedding Base URL</label>
+                                <input type="text" class="form-control" id="embeddingBaseUrl" placeholder="例如: https://api.openai.com/v1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="embeddingApiKey" class="form-label">Embedding API Key</label>
+                                <input type="password" class="form-control" id="embeddingApiKey">
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save"></i> 保存配置
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="loadModelSettings()">
+                                <i class="bi bi-arrow-clockwise"></i> 重置
+                            </button>
+                            <button type="button" class="btn btn-info" onclick="validateModelConfig()">
+                                <i class="bi bi-check-circle"></i> 测试连接
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 截图捕获设置 -->
+        <div class="tab-pane fade" id="capture" role="tabpanel">
+            <div class="row mt-4">
+                <div class="col-md-8">
+                    <h4>截图捕获设置 (后端功能，与应用端冲突)</h4>
+                    <form id="captureForm">
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="screenshot_enabled">
+                            <label class="form-check-label" for="screenshot_enabled">启用截图捕获</label>
+                        </div>
+                        <div class="mb-3">
+                            <label for="screenshot_interval" class="form-label">截图间隔（秒）</label>
+                            <input type="number" class="form-control" id="screenshot_interval" min="1">
+                        </div>
+                        <div class="mb-3">
+                            <label for="screenshot_path" class="form-label">存储路径</label>
+                            <input type="text" class="form-control" id="screenshot_path" placeholder="例如: ./screenshots">
+                        </div>
+
+                        <!-- 文档监控设置 - 已隐藏 -->
+                        <div style="display: none;">
+                            <h4 class="mt-4">文档监控设置</h4>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="vault_enabled">
+                                <label class="form-check-label" for="vault_enabled">启用文档监控</label>
+                            </div>
+                            <div class="mb-3">
+                                <label for="vault_interval" class="form-label">监控间隔（秒）</label>
+                                <input type="number" class="form-control" id="vault_interval" min="1">
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="vault_initial_scan">
+                                <label class="form-check-label" for="vault_initial_scan">初始扫描</label>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> 保存设置
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="loadCaptureSettings()">
+                            <i class="bi bi-arrow-clockwise"></i> 重置
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 处理配置 -->
+        <div class="tab-pane fade" id="processing" role="tabpanel">
+            <div class="row mt-4">
+                <div class="col-md-8">
+                    <form id="processingForm">
+                        <!-- 文档处理 - 已隐藏 -->
+                        <div style="display: none;">
+                            <h4>文档处理</h4>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="doc_enabled">
+                                <label class="form-check-label" for="doc_enabled">启用文档处理</label>
+                            </div>
+                            <div class="mb-3">
+                                <label for="doc_batch_size" class="form-label">批处理大小</label>
+                                <input type="number" class="form-control" id="doc_batch_size" min="1" max="100">
+                            </div>
+                            <div class="mb-3">
+                                <label for="doc_batch_timeout" class="form-label">批处理超时（秒）</label>
+                                <input type="number" class="form-control" id="doc_batch_timeout" min="1" max="60">
+                            </div>
+                        </div>
+
+                        <h4>截图处理</h4>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="screenshot_proc_enabled">
+                            <label class="form-check-label" for="screenshot_proc_enabled">启用截图处理</label>
+                        </div>
+                        <div class="mb-3">
+                            <label for="screenshot_batch_size" class="form-label">批处理大小</label>
+                            <input type="number" class="form-control" id="screenshot_batch_size" min="1" max="100">
+                        </div>
+                        <div class="mb-3">
+                            <label for="screenshot_max_size" class="form-label">最大图片尺寸</label>
+                            <input type="number" class="form-control" id="screenshot_max_size" min="100" max="4096">
+                        </div>
+
+                        <!-- 上下文合并 - 已隐藏 -->
+                        <div style="display: none;">
+                            <h4 class="mt-4">上下文合并</h4>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="merger_enabled">
+                                <label class="form-check-label" for="merger_enabled">启用上下文合并</label>
+                            </div>
+                            <div class="mb-3">
+                                <label for="merger_threshold" class="form-label">相似度阈值（0-1）</label>
+                                <input type="number" class="form-control" id="merger_threshold" min="0" max="1" step="0.01">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> 保存设置
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="loadProcessingSettings()">
+                            <i class="bi bi-arrow-clockwise"></i> 重置
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 内容生成 -->
+        <div class="tab-pane fade" id="generation" role="tabpanel">
+            <div class="row mt-4">
+                <div class="col-md-8">
+                    <form id="generationForm">
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title">活动摘要</h5>
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="activity_enabled">
+                                    <label class="form-check-label" for="activity_enabled">启用活动摘要</label>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="activity_interval" class="form-label">生成间隔（秒）</label>
+                                    <input type="number" class="form-control" id="activity_interval" min="600">
+                                    <small class="text-muted">推荐: 900-1800秒 (15-30分钟)</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title">智能提示</h5>
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="tips_enabled">
+                                    <label class="form-check-label" for="tips_enabled">启用智能提示</label>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="tips_interval" class="form-label">生成间隔（秒）</label>
+                                    <input type="number" class="form-control" id="tips_interval" min="1800">
+                                    <small class="text-muted">推荐: 3600-7200秒 (1-2小时)</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title">待办事项</h5>
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="todos_enabled">
+                                    <label class="form-check-label" for="todos_enabled">启用待办事项</label>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="todos_interval" class="form-label">生成间隔（秒）</label>
+                                    <input type="number" class="form-control" id="todos_interval" min="1800">
+                                    <small class="text-muted">推荐: 1800-3600秒 (30-60分钟)</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title">日报生成</h5>
+                                <div class="mb-3 form-check">
+                                    <input type="checkbox" class="form-check-input" id="report_enabled">
+                                    <label class="form-check-label" for="report_enabled">启用日报生成</label>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="report_time" class="form-label">生成时间</label>
+                                    <input type="time" class="form-control" id="report_time">
+                                    <small class="text-muted">每天固定时间生成日报</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> 保存设置
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="loadGenerationSettings()">
+                            <i class="bi bi-arrow-clockwise"></i> 重置
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prompts管理 -->
+        <div class="tab-pane fade" id="prompts" role="tabpanel">
+            <div class="row mt-4">
+                <div class="col-md-12">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex align-items-center gap-3">
+                            <h4 class="mb-0">Prompts管理</h4>
+                            <select class="form-select form-select-sm" style="width: 200px;" id="promptLanguage" onchange="changePromptLanguage()">
+                                <option value="zh">中文 (zh)</option>
+                                <option value="en">English (en)</option>
+                            </select>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-primary" onclick="saveAllPrompts()">
+                                <i class="bi bi-save"></i> 保存全部
+                            </button>
+                            <button class="btn btn-secondary" onclick="exportPrompts()">
+                                <i class="bi bi-download"></i> 导出
+                            </button>
+                            <label class="btn btn-secondary" for="importFile">
+                                <i class="bi bi-upload"></i> 导入
+                            </label>
+                            <input type="file" id="importFile" accept=".yaml,.yml" style="display:none" onchange="importPrompts(event)">
+                            <button class="btn btn-warning" onclick="resetAllSettings()">
+                                <i class="bi bi-arrow-counterclockwise"></i> 重置全部
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Debug助手配置 -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-info text-white">
+                            <i class="bi bi-bug"></i> Debug助手配置
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" id="debugEnabled">
+                                        <label class="form-check-label" for="debugEnabled">
+                                            <strong>启用Debug模式</strong>
+                                            <br><small class="text-muted">启用后会保存生成过程的详细信息(messages和responses),便于调试和重新生成</small>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="debugOutputPath" class="form-label">Debug输出路径</label>
+                                    <input type="text" class="form-control" id="debugOutputPath" placeholder="${CONTEXT_PATH:.}/debug/generation">
+                                    <small class="text-muted">保存debug文件的目录</small>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-primary mt-2" onclick="saveDebugConfig()">
+                                <i class="bi bi-save"></i> 保存Debug配置
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Prompts分类 -->
+                    <h5 class="mb-3">内容生成Prompts</h5>
+                    <div class="accordion" id="promptsAccordion">
+                        <!-- 智能提示生成 -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#tipsPrompts">
+                                    📝 智能提示生成 (smart_tip_generation)
+                                    <span class="badge bg-secondary ms-2">用于生成工作提示和建议</span>
+                                </button>
+                            </h2>
+                            <div id="tipsPrompts" class="accordion-collapse collapse show" data-bs-parent="#promptsAccordion">
+                                <div class="accordion-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">System Prompt</label>
+                                        <textarea class="form-control font-monospace" id="tips_system" rows="8"></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">User Prompt Template</label>
+                                        <textarea class="form-control font-monospace" id="tips_user" rows="8"></textarea>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-primary" onclick="savePromptCategory('smart_tip_generation')">
+                                            <i class="bi bi-save"></i> 保存
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary" onclick="viewHistory('smart_tip_generation')">
+                                            📜 查看历史记录
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 待办事项提取 -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#todosPrompts">
+                                    ✅ 待办事项提取 (todo_extraction)
+                                    <span class="badge bg-secondary ms-2">从上下文中提取待办事项</span>
+                                </button>
+                            </h2>
+                            <div id="todosPrompts" class="accordion-collapse collapse" data-bs-parent="#promptsAccordion">
+                                <div class="accordion-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">System Prompt</label>
+                                        <textarea class="form-control font-monospace" id="todos_system" rows="8"></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">User Prompt Template</label>
+                                        <textarea class="form-control font-monospace" id="todos_user" rows="8"></textarea>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-primary" onclick="savePromptCategory('todo_extraction')">
+                                            <i class="bi bi-save"></i> 保存
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary" onclick="viewHistory('todo_extraction')">
+                                            📜 查看历史记录
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 日报生成 -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#reportPrompts">
+                                    📊 日报生成 (generation_report)
+                                    <span class="badge bg-secondary ms-2">生成每日工作总结报告</span>
+                                </button>
+                            </h2>
+                            <div id="reportPrompts" class="accordion-collapse collapse" data-bs-parent="#promptsAccordion">
+                                <div class="accordion-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">System Prompt</label>
+                                        <textarea class="form-control font-monospace" id="report_system" rows="8"></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">User Prompt Template</label>
+                                        <textarea class="form-control font-monospace" id="report_user" rows="8"></textarea>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-primary" onclick="savePromptCategory('generation_report')">
+                                            <i class="bi bi-save"></i> 保存
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary" onclick="viewHistory('generation_report')">
+                                            📜 查看历史记录
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 实时活动监控 -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#activityPrompts">
+                                    🔄 实时活动监控 (realtime_activity_monitor)
+                                    <span class="badge bg-secondary ms-2">生成活动记录和总结</span>
+                                </button>
+                            </h2>
+                            <div id="activityPrompts" class="accordion-collapse collapse" data-bs-parent="#promptsAccordion">
+                                <div class="accordion-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">System Prompt</label>
+                                        <textarea class="form-control font-monospace" id="activity_system" rows="8"></textarea>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">User Prompt Template</label>
+                                        <textarea class="form-control font-monospace" id="activity_user" rows="8"></textarea>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-primary" onclick="savePromptCategory('realtime_activity_monitor')">
+                                            <i class="bi bi-save"></i> 保存
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary" onclick="viewHistory('realtime_activity_monitor')">
+                                            📜 查看历史记录
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 历史记录Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">历史生成记录 - <span id="historyCategory"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>历史记录列表</h6>
+                        <div id="historyList" style="max-height: 500px; overflow-y: auto;">
+                            <!-- 动态填充 -->
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <h6>详细信息</h6>
+                        <div id="historyDetail">
+                            <p class="text-muted">请选择一条历史记录</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-success" id="exportBtn" onclick="exportHistoryRecord()" disabled>
+                    <i class="bi bi-download"></i> 导出记录
+                </button>
+                <button type="button" class="btn btn-primary" id="regenerateBtn" onclick="regenerateWithCurrent()" disabled>
+                    <i class="bi bi-arrow-clockwise"></i> 使用当前Prompt重新生成
+                </button>
+                <button type="button" class="btn btn-info" id="compareBtn" onclick="compareResults()" disabled>
+                    <i class="bi bi-file-diff"></i> 对比结果
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 对比结果Modal -->
+<div class="modal fade" id="compareModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-file-diff"></i> 结果对比</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0"><span class="badge bg-secondary">原始结果</span></h6>
+                        </div>
+                        <pre id="originalResult" class="border p-3 bg-light" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 0.875rem;"></pre>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0"><span class="badge bg-success">重新生成结果</span></h6>
+                        </div>
+                        <pre id="newResult" class="border p-3 bg-light" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 0.875rem;"></pre>
+                    </div>
+                </div>
+                <div class="alert alert-info mt-3 mb-0">
+                    <i class="bi bi-info-circle"></i> <strong>提示：</strong>左侧为历史记录中的原始结果，右侧为使用当前Prompt重新生成的结果
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="settingsToast" class="toast" role="alert">
+        <div class="toast-header">
+            <strong class="me-auto">系统设置</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="toastMessage">
+            操作成功
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/settings.js"></script>
+<script>
+// 加载数据目录信息
+async function loadSystemInfo() {
+    try {
+        const response = await fetch('/api/settings/system_info');
+        const data = await response.json();
+        if (data.code === 0 && data.data) {
+            const contextPath = data.data.context_path_absolute || data.data.context_path;
+            document.getElementById('contextPathDisplay').textContent = contextPath;
+            document.getElementById('contextPathDisplay').dataset.path = contextPath;
+        } else {
+            document.getElementById('contextPathDisplay').textContent = '获取失败';
+        }
+    } catch (error) {
+        console.error('加载系统信息失败:', error);
+        document.getElementById('contextPathDisplay').textContent = '获取失败';
+    }
+}
+
+// 复制数据目录路径
+function copyContextPath() {
+    const path = document.getElementById('contextPathDisplay').dataset.path ||
+                 document.getElementById('contextPathDisplay').textContent;
+    if (path && path !== '加载中...' && path !== '获取失败') {
+        navigator.clipboard.writeText(path).then(() => {
+            showToast('路径已复制到剪贴板');
+        }).catch(err => {
+            console.error('复制失败:', err);
+            showToast('复制失败', true);
+        });
+    }
+}
+
+// 页面加载时获取系统信息
+document.addEventListener('DOMContentLoaded', loadSystemInfo);
+
+// 导出历史记录
+window.exportHistoryRecord = async function() {
+    if (!selectedHistoryFile || !currentCategory) {
+        showToast('请先选择一条历史记录', true);
+        return;
+    }
+
+    const exportBtn = document.getElementById('exportBtn');
+    const originalBtnText = exportBtn.innerHTML;
+
+    try {
+        exportBtn.disabled = true;
+        exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>导出中...';
+
+        const response = await fetch(`/api/settings/prompts/history/${currentCategory}/${selectedHistoryFile}`);
+        const data = await response.json();
+
+        if (data.code === 0 && data.data) {
+            const exportData = {
+                category: currentCategory,
+                filename: selectedHistoryFile,
+                timestamp: data.data.timestamp,
+                messages: data.data.messages,
+                response: data.data.response
+            };
+
+            const jsonStr = JSON.stringify(exportData, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = selectedHistoryFile || 'export.json';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(downloadUrl);
+            }, 100);
+        } else {
+            showToast('导出失败: ' + (data.message || '未知错误'), true);
+        }
+    } catch (error) {
+        console.error('导出错误:', error);
+        showToast('导出失败: ' + error.message, true);
+    } finally {
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalBtnText;
+    }
+};
+</script>
+{% endblock %}

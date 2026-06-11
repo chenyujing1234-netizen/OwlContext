@@ -91,7 +91,7 @@ echo ============================================================
 echo 构建完成！
 echo ============================================================
 echo.
-echo 安装程序输出位置: build-output\OwlContext-Setup-0.1.4-beta.exe
+echo 安装程序输出位置: build-output\OwlContext-Setup-0.1.5-beta.exe
 echo.
 
 REM 6. 列出构建的文件

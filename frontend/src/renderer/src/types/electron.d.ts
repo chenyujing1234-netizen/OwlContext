@@ -55,15 +55,67 @@ interface ScreenMonitorAPI {
     success: boolean
     error?: string
   }>
+  updateCurrentRecordApp: (appInfo: CaptureSource[]) => Promise<{
+    success: boolean
+    error?: string
+  }>
+  updateModelConfig: (config: ScreenSettings) => Promise<{
+    success: boolean
+    error?: string
+  }>
+  stopTask: () => Promise<{
+    success: boolean
+    error?: string
+  }>
+  startTask: () => Promise<{
+    success: boolean
+    error?: string
+  }>
+  checkCanRecord: () => Promise<{
+    canRecord: boolean
+    status: string
+  }>
+  getRecordingStats: () => Promise<{
+    processed_screenshots: number
+    failed_screenshots: number
+    generated_activities: number
+    next_activity_eta_seconds: number
+    last_activity_time: string | null
+    session_start_time: string
+    recent_errors: Array<{
+      error_message: string
+      processor_name: string
+      timestamp: string
+    }>
+    recent_screenshots: string[]
+  } | null>
+}
+
+interface dbAPI {
+  getVaultsByDocumentType: (documentType: VaultDocumentType | VaultDocumentType[]) => Promise<Vault[]>
+  getVaultByTitle: (title: string) => Promise<Vault[]>
+  getAllVaults: () => Promise<Vault[]>
+  getHeatmapData: (startTime: number, endTime: number) => Promise<HeatmapData[]>
+  getTasks: (startTime: string, endTime: string) => Promise<TODOActivity[]>
+  [propName: string]: (...args: any[]) => any
+}
+interface EventLoopAPI {
+  getHomeLatestActivity: (status: string) => Promise<LatestActivity[]>
+  [propName: string]: (...args: any[]) => any
+}
+interface serverPushAPI {
+  pushHomeLatestActivity: (callback: (data: Activity) => void) => any
+  [propName: string]: (...args: any[]) => any
 }
 
 declare global {
   interface Window {
     electron: ElectronAPI
     api: WindowApiType
-    dbAPI: any
+    dbAPI: dbAPI
     screenMonitorAPI: ScreenMonitorAPI
     fileService: any
-    serverPushAPI: any
+    serverPushAPI: serverPushAPI
+    eventLoop: EventLoopAPI
   }
 }

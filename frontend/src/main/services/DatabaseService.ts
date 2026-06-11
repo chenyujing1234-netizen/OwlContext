@@ -6,19 +6,21 @@ import Database from 'better-sqlite3'
 import path from 'node:path'
 import fs from 'fs'
 import { app } from 'electron'
-import type { Vault } from '@types'
-import { toSqliteDatetime } from '../utils/time'
+import { isValidIsoString, toSqliteDatetime } from '../utils/time'
 import { is } from '@electron-toolkit/utils'
 import { DB } from './Database'
 import { TODOActivity } from '@interface/db/todo'
-
-class DatabaseManager {
+import { getLogger } from '@shared/logger/main'
+import { VaultDatabaseService } from './VaultDatabaseService'
+const logger = getLogger('DatabaseManager')
+class DatabaseManager extends VaultDatabaseService {
   private db: Database.Database | null = null
   private dbPath: string
   private isInitialized: boolean = false
   private initPromise: Promise<void> | null = null
 
   constructor() {
+    super()
     // Dynamically get the application path
     // this.dbPath = path.join(app.getPath('userData'), "persist", "sqlite", "app.db")
     this.dbPath = path.join(
@@ -27,7 +29,7 @@ class DatabaseManager {
       'sqlite',
       'app.db'
     )
-    console.log('📁 Database path:', this.dbPath)
+    logger.info('📁 Database path:', this.dbPath)
   }
 
   // Asynchronously initialize the database
@@ -57,9 +59,9 @@ class DatabaseManager {
       // Only initialize the table structure when needed
       this.ensureTablesExist()
       this.isInitialized = true
-      console.log('✅ Database initialized successfully')
+      logger.info('✅ Database initialized successfully')
     } catch (error) {
-      console.error('❌ Database initialization failed:', error)
+      logger.error('❌ Database initialization failed:', error)
       throw error
     }
   }
@@ -73,11 +75,11 @@ class DatabaseManager {
       const dbDir = path.dirname(this.dbPath)
 
       if (fs.existsSync(dbDir)) {
-        console.log('📁 Database directory found:', dbDir)
+        logger.info('📁 Database directory found:', dbDir)
         return
       }
 
-      console.log(`⏳ Waiting for database directory... (${i + 1}/${maxRetries})`)
+      logger.info(`⏳ Waiting for database directory... (${i + 1}/${maxRetries})`)
       await new Promise((resolve) => setTimeout(resolve, retryDelay))
     }
 
@@ -97,11 +99,11 @@ class DatabaseManager {
       const tableExists = this.db!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vaults'").get()
 
       if (!tableExists) {
-        console.log('📊 Creating vaults table for the first time...')
+        logger.info('📊 Creating vaults table for the first time...')
         // this.createVaultsTable()
       }
     } catch (error) {
-      console.error('❌ Failed to ensure tables exist:', error)
+      logger.error('❌ Failed to ensure tables exist:', error)
       throw error
     }
   }
@@ -132,7 +134,7 @@ class DatabaseManager {
   //     CREATE INDEX IF NOT EXISTS idx_vaults_is_folder ON vaults(is_folder);
   //     CREATE INDEX IF NOT EXISTS idx_vaults_is_deleted ON vaults(is_deleted);
   //   `)
-  //   console.log('✅ Vaults table created successfully')
+  //   logger.info('✅ Vaults table created successfully')
   // }
 
   // private createTodoTable() {
@@ -151,7 +153,7 @@ class DatabaseManager {
   //     CREATE INDEX IF NOT EXISTS idx_todo_status ON todo(status);
   //     CREATE INDEX IF NOT EXISTS idx_todo_urgency ON todo(urgency);
   //   `)
-  //   console.log('✅ Todo table created successfully')
+  //   logger.info('✅ Todo table created successfully')
   // }
 
   // private createActivityTable() {
@@ -169,7 +171,7 @@ class DatabaseManager {
   //     CREATE INDEX IF NOT EXISTS idx_activity_status ON activity(title);
   //     CREATE INDEX IF NOT EXISTS idx_activity_urgency ON activity(start_time);
   //   `)
-  //   console.log('✅ Activity table created successfully')
+  //   logger.info('✅ Activity table created successfully')
   // }
 
   // private createTipsTable() {
@@ -183,273 +185,8 @@ class DatabaseManager {
   //   this.db!.exec(`
   //     CREATE INDEX IF NOT EXISTS idx_tips_status ON tips(content);
   //   `)
-  //   console.log('✅ Tips table created successfully')
+  //   logger.info('✅ Tips table created successfully')
   // }
-
-  // Query all Vaults (excluding deleted ones)
-  public getVaults(type: string = 'vaults'): Vault[] {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare(`SELECT * FROM vaults WHERE is_deleted = 0 AND document_type = ? ORDER BY id DESC`)
-      const rows = stmt.all(type) as Vault[]
-      console.log(`📊 Found ${rows.length} ${type}`)
-      return rows
-    } catch (error) {
-      console.error('❌ Failed to query Vaults:', error)
-      throw error
-    }
-  }
-
-  // Query Vault by ID
-  public getVaultById(id: number): Vault | undefined {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare('SELECT * FROM vaults WHERE id = ? AND is_deleted = 0')
-      const row = stmt.get(id) as Vault | undefined
-      console.log(`📋 Querying Vault by ID: ${id}`, row ? '✅ Found' : '❌ Not found')
-      return row
-    } catch (error) {
-      console.error('❌ Failed to query Vault by ID:', error)
-      throw error
-    }
-  }
-
-  // Query Vaults by parent ID
-  public getVaultsByParentId(parentId: number | null): Vault[] {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare('SELECT * FROM vaults WHERE parent_id = ? AND is_deleted = 0 ORDER BY id DESC')
-      const rows = stmt.all(parentId) as Vault[]
-      console.log(`📊 Found ${rows.length} Vaults by parent ID`)
-      return rows
-    } catch (error) {
-      console.error('❌ Failed to query Vaults by parent ID:', error)
-      throw error
-    }
-  }
-
-  // Query folders
-  public getFolders(): Vault[] {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare('SELECT * FROM vaults WHERE is_folder = 1 AND is_deleted = 0 ORDER BY id DESC')
-      const rows = stmt.all() as Vault[]
-      console.log(`📁 Found ${rows.length} folders`)
-      return rows
-    } catch (error) {
-      console.error('❌ Failed to query folders:', error)
-      throw error
-    }
-  }
-
-  public getVaultByTitle(title: string): Vault[] {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare('SELECT * FROM vaults WHERE title = ? AND is_deleted = 0')
-      const rows = stmt.all([title]) as Vault[]
-      console.log(`📋 Querying Vault by title: ${title}`, rows ? `✅ Found ${rows.length}` : '❌ Not found')
-      return rows
-    } catch (error) {
-      console.error('❌ Failed to query Vault by title:', error)
-      throw error
-    }
-  }
-
-  // Insert a Vault
-  public insertVault(vault: Vault): { id: number } {
-    try {
-      this.ensureInitialized()
-      const title = vault.title || ''
-      const summary = vault.summary || ''
-      const tags = vault.tags || ''
-      const parent_id = vault.parent_id || null
-      const is_folder = vault.is_folder || 0
-      const sort_order = vault.sort_order || 0
-
-      const stmt = this.db!.prepare(
-        'INSERT INTO vaults (title, content, summary, tags, parent_id, is_folder, is_deleted, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      )
-
-      const now = new Date()
-      const result = stmt.run(
-        title,
-        vault.content,
-        summary,
-        tags,
-        parent_id,
-        is_folder,
-        0,
-        toSqliteDatetime(now),
-        toSqliteDatetime(now),
-        sort_order
-      )
-
-      console.log('✅ Vault inserted successfully:', result.lastInsertRowid)
-      return { id: result.lastInsertRowid as number }
-    } catch (error) {
-      console.error('❌ Failed to insert Vault:', error)
-      throw error
-    }
-  }
-
-  // Update a Vault
-  public updateVaultById(id: number, vault: Partial<Vault>): { changes: number } {
-    try {
-      this.ensureInitialized()
-      // Check if the Vault exists
-      const existingVault = this.getVaultById(id)
-      if (!existingVault) {
-        throw new Error(`Vault with ID ${id} not found`)
-      }
-
-      // Find the changed fields
-      const changedFields: string[] = []
-      const values: any[] = []
-
-      const fieldMapping = {
-        title: vault.title !== undefined && vault.title !== existingVault.title,
-        content: vault.content !== undefined && vault.content !== existingVault.content,
-        summary: vault.summary !== undefined && vault.summary !== existingVault.summary,
-        tags: vault.tags !== undefined && vault.tags !== existingVault.tags,
-        parent_id: vault.parent_id !== undefined && vault.parent_id !== existingVault.parent_id,
-        is_folder: vault.is_folder !== undefined && vault.is_folder !== existingVault.is_folder,
-        is_deleted: vault.is_deleted !== undefined && vault.is_deleted !== existingVault.is_deleted,
-        created_at: vault.created_at !== undefined && vault.created_at !== existingVault.created_at,
-        updated_at: vault.updated_at !== undefined && vault.updated_at !== existingVault.updated_at
-      }
-
-      // Build the update statement
-      Object.entries(fieldMapping).forEach(([field, hasChanged]) => {
-        if (hasChanged) {
-          changedFields.push(field)
-          values.push(vault[field as keyof Vault])
-        }
-      })
-
-      // If there are no changed fields, return directly
-      if (changedFields.length === 0) {
-        console.log(`ℹ️ No fields to update for Vault ${id}`)
-        return { changes: 0 }
-      }
-
-      // Add the update timestamp
-      changedFields.push('updated_at')
-      values.push(new Date().toISOString())
-
-      // Build the dynamic SQL
-      const setClause = changedFields.map((field) => `${field} = ?`).join(', ')
-      const sql = `UPDATE vaults SET ${setClause} WHERE id = ?`
-      values.push(id)
-
-      const stmt = this.db!.prepare(sql)
-      const result = stmt.run(...values)
-
-      console.log(`✅ Vault updated successfully: ID ${id}, updated fields: ${changedFields.join(', ')}, rows affected: ${result.changes}`)
-      return { changes: result.changes }
-    } catch (error) {
-      console.error('❌ Failed to update Vault:', error)
-      throw error
-    }
-  }
-
-  // Soft delete a Vault (mark as deleted)
-  public softDeleteVaultById(id: number): { changes: number } {
-    try {
-      this.ensureInitialized()
-      // Check if the Vault exists
-      const existingVault = this.getVaultById(id)
-      if (!existingVault) {
-        throw new Error(`Vault with ID ${id} not found`)
-      }
-
-      const stmt = this.db!.prepare('UPDATE vaults SET is_deleted = 1, updated_at = ? WHERE id = ?')
-      const now = new Date().toISOString()
-      const result = stmt.run(now, id)
-
-      console.log(`🗑️ Vault soft deleted successfully: ID ${id}, rows affected: ${result.changes}`)
-      return { changes: result.changes }
-    } catch (error) {
-      console.error('❌ Failed to soft delete Vault:', error)
-      throw error
-    }
-  }
-
-  // Restore a deleted Vault
-  public restoreVaultById(id: number): { changes: number } {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare('UPDATE vaults SET is_deleted = 0, updated_at = ? WHERE id = ?')
-      const now = new Date().toISOString()
-      const result = stmt.run(now, id)
-
-      console.log(`♻️ Vault restored successfully: ID ${id}, rows affected: ${result.changes}`)
-      return { changes: result.changes }
-    } catch (error) {
-      console.error('❌ Failed to restore Vault:', error)
-      throw error
-    }
-  }
-
-  // Hard delete a Vault (permanently delete)
-  public hardDeleteVaultById(id: number): { changes: number } {
-    try {
-      this.ensureInitialized()
-      // Check if the Vault exists
-      const existingVault = this.getVaultById(id)
-      if (!existingVault) {
-        throw new Error(`Vault with ID ${id} not found`)
-      }
-
-      const stmt = this.db!.prepare('DELETE FROM vaults WHERE id = ?')
-      const result = stmt.run(id)
-
-      console.log(`💥 Vault permanently deleted successfully: ID ${id}, rows affected: ${result.changes}`)
-      return { changes: result.changes }
-    } catch (error) {
-      console.error('❌ Failed to permanently delete Vault:', error)
-      throw error
-    }
-  }
-
-  // Create a folder
-  public createFolder(title: string, parentId?: number): { id: number } {
-    try {
-      this.ensureInitialized()
-      const stmt = this.db!.prepare(
-        'INSERT INTO vaults (title, content, is_folder, parent_id, is_deleted, created_at, updated_at) VALUES (?, ?, 1, ?, 0, ?, ?)'
-      )
-
-      const now = new Date().toISOString()
-      const result = stmt.run(title, '', parentId || null, now, now)
-
-      console.log('📁 Folder created successfully:', result.lastInsertRowid)
-      return { id: result.lastInsertRowid as number }
-    } catch (error) {
-      console.error('❌ Failed to create folder:', error)
-      throw error
-    }
-  }
-
-  // Delete a Vault
-  public deleteVaultById(id: number): { changes: number } {
-    try {
-      this.ensureInitialized()
-      // Check if the Vault exists
-      const existingVault = this.getVaultById(id)
-      if (!existingVault) {
-        throw new Error(`Vault with ID ${id} not found`)
-      }
-
-      const stmt = this.db!.prepare('DELETE FROM vaults WHERE id = ?')
-      const result = stmt.run(id)
-
-      console.log(`🗑️ Vault deleted successfully: ID ${id}, rows affected: ${result.changes}`)
-      return { changes: result.changes }
-    } catch (error) {
-      console.error('❌ Failed to delete Vault:', error)
-      throw error
-    }
-  }
 
   // Get all activities
   public getAllActivities() {
@@ -457,10 +194,10 @@ class DatabaseManager {
       this.ensureInitialized()
       const stmt = this.db!.prepare('SELECT * FROM activity')
       const rows = stmt.all()
-      console.log('✅ All activities retrieved successfully:', rows)
+      logger.info('✅ All activities retrieved successfully:', rows)
       return rows
     } catch (error) {
-      console.error('❌ Failed to get all activities:', error)
+      logger.error('❌ Failed to get all activities:', error)
       throw error
     }
   }
@@ -478,22 +215,28 @@ class DatabaseManager {
       const rows = stmt.all(start, end)
       return rows
     } catch (error) {
-      console.error('❌ Failed to get new activities:', error)
+      logger.error('❌ Failed to get new activities:', error)
       throw error
     }
   }
 
-  public getTasks(startTime: string, endTime: string = '2099-12-31 00:00:00') {
+  public getTasks(startTime: string, endTime: string) {
     try {
       this.ensureInitialized()
-      const start = toSqliteDatetime(startTime)
-      const end = toSqliteDatetime(endTime)
+      if (!isValidIsoString(startTime)) {
+        logger.error('❌ Invalid startTime format:', startTime)
+        throw new Error('Invalid startTime format. Expected ISO 8601 string.')
+      }
+      if (!isValidIsoString(endTime)) {
+        logger.error('❌ Invalid endTime format:', endTime)
+        throw new Error('Invalid endTime format. Expected ISO 8601 string.')
+      }
       const db = DB.getInstance(DB.dbName)
-      const sql = 'SELECT * FROM todo WHERE start_time > ? AND start_time < ? ORDER BY start_time ASC'
-      const rows = db.query<TODOActivity>(sql, [start, end])
+      const sql = 'SELECT * FROM todo WHERE start_time >= ? AND start_time < ? ORDER BY start_time ASC'
+      const rows = db.query<TODOActivity>(sql, [startTime, endTime])
       return rows
     } catch (error) {
-      console.error('❌ Failed to get tasks:', error)
+      logger.error('❌ Failed to get tasks:', error)
       throw error
     }
   }
@@ -508,7 +251,7 @@ class DatabaseManager {
       const info = db.insert('todo', taskData)
       return info
     } catch (error) {
-      console.error('❌ Failed to add task:', error)
+      logger.error('❌ Failed to add task:', error)
       throw error
     }
   }
@@ -518,10 +261,10 @@ class DatabaseManager {
       this.ensureInitialized()
       const stmt = this.db!.prepare('UPDATE todo SET status = 1 - status WHERE id = ?')
       const result = stmt.run(taskId)
-      console.log('✅ Task status toggled successfully')
+      logger.info('✅ Task status toggled successfully')
       return result
     } catch (error) {
-      console.error('❌ Failed to toggle task status:', error)
+      logger.error('❌ Failed to toggle task status:', error)
       throw error
     }
   }
@@ -563,10 +306,10 @@ class DatabaseManager {
       const stmt = this.db!.prepare(`UPDATE todo SET ${updateFields.join(', ')} WHERE id = ?`)
       const result = stmt.run(...values)
 
-      console.log(`✅ Task updated successfully: ID ${taskId}, rows affected: ${result.changes}`)
+      logger.info(`✅ Task updated successfully: ID ${taskId}, rows affected: ${result.changes}`)
       return result
     } catch (error) {
-      console.error('❌ Failed to update task:', error)
+      logger.error('❌ Failed to update task:', error)
       throw error
     }
   }
@@ -584,10 +327,10 @@ class DatabaseManager {
       const stmt = this.db!.prepare('DELETE FROM todo WHERE id = ?')
       const result = stmt.run(taskId)
 
-      console.log(`✅ Task deleted successfully: ID ${taskId}, rows affected: ${result.changes}`)
+      logger.info(`✅ Task deleted successfully: ID ${taskId}, rows affected: ${result.changes}`)
       return result
     } catch (error) {
-      console.error('❌ Failed to delete task:', error)
+      logger.error('❌ Failed to delete task:', error)
       throw error
     }
   }
@@ -597,20 +340,20 @@ class DatabaseManager {
       this.ensureInitialized()
       const stmt = this.db!.prepare('SELECT * FROM tips')
       const rows = stmt.all()
-      console.log('✅ Tips retrieved successfully')
+      logger.info('✅ Tips retrieved successfully')
       return rows
     } catch (error) {
-      console.error('❌ Failed to get tips:', error)
+      logger.error('❌ Failed to get tips:', error)
       throw error
     }
   }
 
   close() {
     try {
-      console.log('🔒 Closing database connection...')
+      logger.info('🔒 Closing database connection...')
       this.db?.close()
     } catch (error) {
-      console.error('❌ Error closing database:', error)
+      logger.error('❌ Error closing database:', error)
     }
   }
 }

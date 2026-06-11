@@ -10,12 +10,18 @@ export enum IpcChannel {
   App_SetSpellCheckLanguages = 'app:set-spell-check-languages',
   App_ShowUpdateDialog = 'app:show-update-dialog',
   App_CheckForUpdate = 'app:check-for-update',
+  App_DownloadUpdate = 'app:download-update',
+  App_QuitAndInstall = 'app:quit-and-install',
+  App_CancelDownload = 'app:cancel-download',
   App_Reload = 'app:reload',
   App_Info = 'app:info',
   App_Proxy = 'app:proxy',
   App_SetLaunchToTray = 'app:set-launch-to-tray',
   App_SetTray = 'app:set-tray',
   App_SetTrayOnClose = 'app:set-tray-on-close',
+  Tray_UpdateRecordingStatus = 'tray:update-recording-status',
+  Tray_Show = 'tray:show',
+  Tray_Hide = 'tray:hide',
   App_SetTheme = 'app:set-theme',
   App_SetAutoUpdate = 'app:set-auto-update',
   App_SetTestPlan = 'app:set-test-plan',
@@ -299,6 +305,7 @@ export enum IpcChannel {
   Database_SoftDeleteVaultById = 'database:soft-delete-vault-by-id',
   Database_RestoreVaultById = 'database:restore-vault-by-id',
   Database_HardDeleteVaultById = 'database:hard-delete-vault-by-id',
+  Database_GetVaultsByDocumentType = 'database:get-vaults-by-document-type',
 
   // activity
   Database_GetAllActivities = 'database:get-all-activities',
@@ -333,11 +340,9 @@ export enum IpcChannel {
   Task_Update_Current_Record_App = 'task:update-current-record-app',
   Task_Check_Can_Record = 'task:check-can-record',
 
-  // Tray
-  Tray_UpdateRecordingStatus = 'tray:update-recording-status',
-  Tray_Show = 'tray:show',
-  Tray_Hide = 'tray:hide',
+  // Heatmap
+  Get_Heatmap_Data = 'heatmap:get-data',
 
-  // Database types
-  Database_GetVaultsByDocumentType = 'database:get-vaults-by-document-type'
+  // Home
+  Get_Home_LatestActivity = 'home:get-latest-activity'
 }

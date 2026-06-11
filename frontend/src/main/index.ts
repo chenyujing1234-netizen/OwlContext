@@ -8,7 +8,7 @@ import './bootstrap'
 
 import '@main/config'
 
-import { app, shell, BrowserWindow, protocol, Tray, Menu, nativeImage } from 'electron'
+import { app, shell, BrowserWindow, protocol } from 'electron'
 import path, { join } from 'path'
 import fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -17,17 +17,38 @@ import { registerIpc } from './ipc'
 import openInspector from './utils/inspector'
 import db from './services/DatabaseService'
 import screenshotService from './services/ScreenshotService'
-import { isDev } from './constant'
+import { isDev, isMac } from './constant'
 import icon from '../../resources/icon.png?asset'
-import { ensureBackendRunning, startBackendInBackground, stopBackendServerSync } from './backend'
+import { startBackendInBackground, stopBackendServerSync } from './backend'
 import { powerWatcher } from './background/os/Power'
 import { initLog } from '@shared/logger/init'
 import { getLogger } from '@shared/logger/main'
+import { monitor } from '@shared/logger/performance'
+import { TrayService } from './services/TrayService'
+import { ScreenMonitorTask } from './background/task/screen-monitor-task'
+import { autoUpdater } from 'electron-updater'
+import { IpcChannel } from '@shared/IpcChannel'
+import { LatestActivityTask } from './background/task/latest-activity'
+
 initLog()
 const logger = getLogger('MainEntry')
 
-const isPackaged = app.isPackaged
-const actuallyDev = isDev && !isPackaged // true
+autoUpdater.logger = logger
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+  process.exit(0)
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+  })
+}
 
 // Save the original console.log
 const originalConsoleLog = console.log
@@ -35,11 +56,15 @@ const originalConsoleLog = console.log
 // Screenshot cleanup timer
 let cleanupIntervalId: NodeJS.Timeout | null = null
 
-// Keep references to main window and system tray
-let tray: Tray | null = null
-let mainWindowRef: BrowserWindow | null = null
-// Flag for distinguishing user-initiated quit from window close/hide
-;(app as any).isQuiting = false
+// Tray service instance
+let trayService: TrayService | null = null
+
+/**
+ * Get tray service instance
+ */
+export function getTrayService(): TrayService | null {
+  return trayService
+}
 
 /**
  * Start screenshot cleanup scheduled task
@@ -71,7 +96,9 @@ async function performCleanup() {
     logger.info('Starting screenshot cleanup...')
     const result = await screenshotService.cleanupOldScreenshots(15) // Keep 15 days
     if (result.success) {
-      logger.info(`Screenshot cleanup completed. Deleted ${result.deletedCount} directories, freed ${((result.deletedSize || 0) / 1024 / 1024).toFixed(2)} MB`)
+      logger.info(
+        `Screenshot cleanup completed. Deleted ${result.deletedCount} directories, freed ${((result.deletedSize || 0) / 1024 / 1024).toFixed(2)} MB`
+      )
     } else {
       logger.error(`Screenshot cleanup failed: ${result.error}`)
     }
@@ -98,7 +125,18 @@ function createWindow() {
     height: 660,
     show: false,
     autoHideMenuBar: true,
-    icon: icon, // Set icon for all platforms
+    icon,
+    // Use frameless window with custom titlebar only on macOS
+    ...(isMac
+      ? {
+          frame: false,
+          titleBarStyle: 'hidden',
+          trafficLightPosition: { x: 12, y: 12 }
+        }
+      : {
+          // On Windows/Linux, use default frame with window controls
+          frame: true
+        }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -120,30 +158,26 @@ function createWindow() {
 
   mainWindow.on('ready-to-show', () => {
     // Check if launched with --hidden or --startup flag (from auto-start)
-    const isAutoStart = process.argv.includes('--hidden') || 
-                        process.argv.includes('--startup') ||
-                        app.getLoginItemSettings().wasOpenedAtLogin
-    
+    const isAutoStart =
+      process.argv.includes('--hidden') ||
+      process.argv.includes('--startup') ||
+      app.getLoginItemSettings().wasOpenedAtLogin
+
     if (!isAutoStart) {
       // Only show window if not launched from auto-start
       mainWindow.show()
     } else {
       logger.info('Application launched from auto-start, starting in background mode')
     }
-
-    if (!actuallyDev) {
-      ensureBackendRunning(mainWindow).catch((error) => {
-        logger.error('Failed to ensure backend is running:', error)
-      })
-    }
   })
 
-  // Intercept close to hide to tray instead of quitting
+  // Intercept window close event to hide instead of closing
   mainWindow.on('close', (event) => {
-    // If quitting explicitly (from tray menu), allow close
-    if ((app as any).isQuiting) return
-    event.preventDefault()
-    mainWindow.hide()
+    if (!(app as any).isQuitting) {
+      event.preventDefault()
+      mainWindow.hide()
+      logger.info('Window hidden instead of closed')
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -165,36 +199,60 @@ function createWindow() {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 let server: any
+const task = new ScreenMonitorTask()
+const latestActivityTask = new LatestActivityTask()
 app.whenReady().then(() => {
   logger.info('app_started', { argv: process.argv, version: app.getVersion() })
-
+  monitor.start(5000)
   protocol.registerBufferProtocol('vikingdb', (request, callback) => {
     try {
       let filePath = request.url.replace('vikingdb://', '')
       filePath = decodeURIComponent(filePath)
 
-      const fullPath = path.resolve(filePath)
+      const resolved = path.resolve(filePath)
 
-      console.log('Reading file:', fullPath)
-
-      if (fs.existsSync(fullPath)) {
-        const data = fs.readFileSync(fullPath)
-        const extension = path.extname(fullPath).toLowerCase()
-
-        // Set MIME type based on file extension
-        let mimeType = 'application/octet-stream'
-        if (extension === '.png') mimeType = 'image/png'
-        else if (extension === '.jpg' || extension === '.jpeg') mimeType = 'image/jpeg'
-        else if (extension === '.gif') mimeType = 'image/gif'
-        else if (extension === '.svg') mimeType = 'image/svg+xml'
-
-        callback({
-          mimeType: mimeType,
-          data: data
-        })
-      } else {
-        callback({ error: -6 })
+      if (!fs.existsSync(resolved)) {
+        callback({ error: -6 /* net::ERR_FILE_NOT_FOUND */ })
+        return
       }
+
+      // Constrain reads to the directory the backend writes its data into
+      // (mirrors `CONTEXT_PATH` in backend.ts). Without this, the renderer
+      // can read arbitrary local files via e.g. `vikingdb:///Users/<u>/.ssh/id_rsa`,
+      // which combined with `webSecurity: false` and the permissive CSP
+      // (`connect-src *`) makes any future renderer XSS a full local-file
+      // exfiltration primitive. We also realpath() the resolved path so a
+      // symlink planted inside userData cannot be used to escape the sandbox.
+      const allowedRoot =
+        !app.isPackaged && is.dev
+          ? path.resolve('.')
+          : path.resolve(app.getPath('userData'))
+      const realPath = fs.realpathSync(resolved)
+      const isUnderRoot =
+        realPath === allowedRoot || realPath.startsWith(allowedRoot + path.sep)
+
+      if (!isUnderRoot) {
+        console.error(
+          `vikingdb:// blocked path outside allowed root: ${realPath} (root: ${allowedRoot})`
+        )
+        callback({ error: -10 /* net::ERR_ACCESS_DENIED */ })
+        return
+      }
+
+      const data = fs.readFileSync(realPath)
+      const extension = path.extname(realPath).toLowerCase()
+
+      // Set MIME type based on file extension
+      let mimeType = 'application/octet-stream'
+      if (extension === '.png') mimeType = 'image/png'
+      else if (extension === '.jpg' || extension === '.jpeg') mimeType = 'image/jpeg'
+      else if (extension === '.gif') mimeType = 'image/gif'
+      else if (extension === '.svg') mimeType = 'image/svg+xml'
+
+      callback({
+        mimeType: mimeType,
+        data: data
+      })
     } catch (error) {
       console.error('Error reading file:', error)
       callback({ error: -2 })
@@ -207,6 +265,7 @@ app.whenReady().then(() => {
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
   // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
 
@@ -219,92 +278,55 @@ app.whenReady().then(() => {
   })
 
   const mainWindow = createWindow()
-  mainWindowRef = mainWindow
   openInspector(mainWindow)
-  powerWatcher.run(mainWindow)
+  powerWatcher.run()
   startBackendInBackground(mainWindow)
+
+  // Initialize tray service
+  trayService = new TrayService(mainWindow)
+  trayService.create()
+  logger.info('Tray service initialized')
 
   // Start screenshot cleanup scheduled task
   startScreenshotCleanup()
+  task.init()
+  latestActivityTask.init()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+    } else {
+      // If window exists but is hidden, show it
+      const existingWindow = BrowserWindow.getAllWindows()[0]
+      if (existingWindow) {
+        existingWindow.show()
+        existingWindow.focus()
+      }
+    }
   })
 
   registerIpc(mainWindow, app)
 
-  // Initialize system tray for background running
-  try {
-    // Prefer using packaged asset path for tray icon
-    let trayImage = nativeImage.createFromPath(icon as unknown as string)
-    if (trayImage.isEmpty()) {
-      // Fallback to an absolute path under resources if needed
-      const fallback = path.join(app.getAppPath(), 'resources', 'icon.png')
-      trayImage = nativeImage.createFromPath(fallback)
-    }
-    tray = new Tray(trayImage)
-    tray.setToolTip('OwlContext')
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: '显示窗口',
-        click: () => {
-          if (mainWindowRef) {
-            mainWindowRef.show()
-            if (mainWindowRef.isMinimized()) mainWindowRef.restore()
-            mainWindowRef.focus()
-          }
-        }
-      },
-      {
-        label: '应用管理',
-        click: () => {
-          shell.openExternal('http://127.0.0.1:8000/contexts').catch((error) => {
-            logger.error('Failed to open management page:', error)
-          })
-        }
-      },
-      { type: 'separator' },
-      {
-        label: '退出',
-        click: () => {
-          ;(app as any).isQuiting = true
-          app.quit()
-        }
-      }
-    ])
-    tray.setContextMenu(contextMenu)
-    
-    // Left-click to show context menu
-    tray.on('click', () => {
-      if (tray && mainWindowRef) {
-        tray.popUpContextMenu(contextMenu)
-      }
-    })
-    
-    // Double-click to show the window directly
-    tray.on('double-click', () => {
-      if (mainWindowRef) {
-        mainWindowRef.show()
-        if (mainWindowRef.isMinimized()) mainWindowRef.restore()
-        mainWindowRef.focus()
-      }
-    })
-  } catch (e) {
-    logger.error('Failed to initialize system tray:', e as Error)
-  }
+  mainWindow.webContents.send(IpcChannel.Notification_Send, {
+    id: '123',
+    type: 'info',
+    message: 'hello',
+    timestamp: new Date().getTime(),
+    source: 'update'
+  })
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
-  // 不在 Windows/Linux 上自动退出，保持后台运行（通过托盘）
-  if (process.platform === 'darwin') {
-    // macOS 上保持与平台一致的行为：除非 Cmd+Q，否则保持活跃
-    // 这里什么都不做即可
-  }
+  monitor.stop()
+  // Don't quit the app when windows are closed - keep running in tray
+  // App will only quit when user clicks "Quit" from tray menu
+  task.unregister()
+  logger.info('All windows closed, app continues running in tray')
 })
 
 // In this file you can include the rest of your app's specific main process
@@ -324,23 +346,26 @@ if (!isDev) {
 }
 
 app.on('before-quit', () => {
-  ;(app as any).isQuiting = true
+  // Set flag to allow windows to actually close
+  ;(app as any).isQuitting = true
+
   // Restore the original console.log to avoid "Object has been destroyed" errors during exit
   console.log = originalConsoleLog
 
   // Stop screenshot cleanup scheduled task
   stopScreenshotCleanup()
 
+  // Destroy tray
+  if (trayService) {
+    trayService.destroy()
+    trayService = null
+  }
+
   if (server) {
     server.close()
   }
   stopBackendServerSync()
   db.close()
-  // Destroy tray on quit
-  if (tray) {
-    try {
-      tray.destroy()
-    } catch {}
-    tray = null
-  }
+
+  logger.info('App is quitting, all resources cleaned up')
 })

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import store, { persistor } from '@renderer/store'
 import { Provider } from 'react-redux'
 import { PersistGate } from 'redux-persist/integration/react'
@@ -18,8 +18,9 @@ import Router from './Router'
 import { BackendStatus } from './components/Loading'
 import { CaptureSourcesProvider } from './atom/capture.atom'
 import Settings from './pages/settings/settings'
-import { ServiceProvider, useServiceHandler } from './atom/event-loop.atom'
+import { ServiceProvider, useObservableTask } from './atom/event-loop.atom'
 import { getLogger } from '@shared/logger/renderer'
+import { useMemoizedFn } from 'ahooks'
 
 const logger = getLogger('App.tsx')
 const isEnglish = true // Hardcode for now, will change later
@@ -31,91 +32,84 @@ interface BackendStatusInfo {
 
 function AppContent(): React.ReactElement {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('starting')
-  const [showSetting, setShowSettings] = useState<boolean>(false)
-  const isScreenLockedRef = React.useRef(false)
+  const [showSetting, setShowSettings] = useState<boolean>(true)
 
-  useEffect(() => {
-    let statusCheckInterval: NodeJS.Timeout
-    // Get initial status
-    const checkInitialStatus = async () => {
-      try {
-        const statusInfo: BackendStatusInfo = await window.electron.ipcRenderer.invoke('backend:get-status')
-        setBackendStatus(statusInfo.status)
-      } catch (error) {
-        logger.error('Failed to get initial backend status:', { error })
-        setBackendStatus('error')
-      }
+  const checkInitialStatus = useMemoizedFn(async () => {
+    try {
+      const statusInfo: BackendStatusInfo = await window.electron.ipcRenderer.invoke('backend:get-status')
+      setBackendStatus(statusInfo.status)
+    } catch (error) {
+      logger.error('Failed to get initial backend status:', { error })
+      setBackendStatus('error')
     }
-
-    // Listen for status changes
+  })
+  const statusCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const clearStatusCheckInterval = useMemoizedFn(() => {
+    if (statusCheckIntervalRef.current) {
+      clearTimeout(statusCheckIntervalRef.current)
+      statusCheckIntervalRef.current = null
+    }
+  })
+  const scheduleNextCheck = useMemoizedFn(() => {
+    statusCheckIntervalRef.current = setTimeout(() => {
+      if (backendStatus !== 'running') {
+        checkInitialStatus()
+      } else {
+        clearStatusCheckInterval()
+      }
+      scheduleNextCheck()
+    }, 3000)
+  })
+  useEffect(() => {
     const handleStatusChange = (_event: any, statusInfo: BackendStatusInfo) => {
       logger.info('Backend status changed:', statusInfo)
       setBackendStatus(statusInfo.status)
+      if (statusInfo.status === 'running') {
+        clearStatusCheckInterval()
+      }
     }
 
     checkInitialStatus()
-
     // Listen for status change events
     window.electron.ipcRenderer.on('backend:status-changed', handleStatusChange)
-
-    // Periodically check status (as a fallback)
-    // Dynamically adjust check interval: reduce frequency when screen is locked
-    const getCheckInterval = () => (isScreenLockedRef.current ? 30000 : 3000) // 30 seconds when locked, 3 seconds normally
-
-    const scheduleNextCheck = () => {
-      statusCheckInterval = setTimeout(() => {
-        if (backendStatus !== 'running') {
-          checkInitialStatus()
-        }
-        scheduleNextCheck()
-      }, getCheckInterval())
-    }
 
     scheduleNextCheck()
 
     return () => {
-      if (statusCheckInterval) {
-        clearTimeout(statusCheckInterval)
-      }
+      clearStatusCheckInterval()
       window.electron.ipcRenderer.removeAllListeners('backend:status-changed')
     }
-  }, [backendStatus])
+  }, [])
 
-  // Listen for lock/unlock screen events
-  useServiceHandler('lock-screen', () => {
-    logger.info('🔒 Screen locked, reducing backend status check frequency')
-    isScreenLockedRef.current = true
-  })
-
-  useServiceHandler('unlock-screen', () => {
-    logger.info('🔓 Screen unlocked, restoring backend status check frequency')
-    isScreenLockedRef.current = false
+  useObservableTask({
+    active: () => {
+      logger.info('🔓 Screen unlocked, check backend sever initial status')
+      checkInitialStatus()
+    },
+    inactive: () => {
+      logger.info('🔒 Screen locked, stop check backend sever initial status')
+      clearStatusCheckInterval()
+    }
   })
 
   useEffect(() => {
     window.serverPushAPI.getInitCheckData((data) => {
       const temp = JSON.parse(data)
-
+      logger.info('Init settings data:', temp)
       setShowSettings(!temp.data.components.llm)
     })
   }, [])
 
   // Decide whether to display the application based on the status
   const pythonServerStarted = backendStatus === 'running'
-
+  const closeSetting = useMemoizedFn(() => {
+    setShowSettings(false)
+  })
   return (
     <>
       {pythonServerStarted ? (
         <CaptureSourcesProvider>
-          {showSetting ? (
-            <Settings
-              onOk={() => {
-                setShowSettings(false)
-              }}
-            />
-          ) : (
-            <Router />
-          )}
+          {showSetting ? <Settings closeSetting={closeSetting} init /> : <Router />}
         </CaptureSourcesProvider>
       ) : (
         <LoadingComponent backendStatus={backendStatus} />
@@ -125,8 +119,6 @@ function AppContent(): React.ReactElement {
 }
 
 function App(): React.ReactElement {
-  logger.info('App initialized')
-
   return (
     <Provider store={store}>
       <ConfigProvider locale={isEnglish ? enUS : zhCN}>

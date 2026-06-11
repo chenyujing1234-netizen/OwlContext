@@ -1,5 +1,5 @@
 #define MyAppName "OwlContext"
-#define MyAppVersion "0.1.4-beta"
+#define MyAppVersion "0.1.5-beta"
 #define MyAppPublisher "OwlContext"
 #define MyAppURL "https://example.com/"
 #define MyAppExeName "OwlContext.exe"

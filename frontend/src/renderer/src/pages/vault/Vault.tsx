@@ -5,16 +5,19 @@ import { useCallback, useMemo } from 'react'
 import { debounce } from 'lodash'
 import { Card, Spin } from '@arco-design/web-react'
 import { useSearchParams } from 'react-router-dom'
-import { useVaults } from '@renderer/hooks/useVault'
-import MarkdownEditor from '@renderer/components/MarkdownEditor'
-import StatusBar from '@renderer/components/StatusBar/StatusBar'
+import { useVaults } from '@renderer/hooks/use-vault'
+import MarkdownEditor from '@renderer/components/markdown-editor'
+import StatusBar from '@renderer/components/status-bar/StatusBar'
 import { Allotment } from 'allotment'
-import { useAIAssistant } from '@renderer/hooks/useAIAssistant'
-import { useAllotment } from '@renderer/hooks/useAllotment'
-import AIToggleButton from '@renderer/components/AIToggleButton'
-import AIAssistant from '@renderer/components/AIAssistant'
+import { useAllotment } from '@renderer/hooks/use-allotment'
+import AIToggleButton from '@renderer/components/ai-toggle-button'
+import AIAssistant from '@renderer/components/ai-assistant'
 import { removeMarkdownSymbols } from '@renderer/utils/vault'
-import './Vault.css'
+import './vault.css'
+import { useSelector } from 'react-redux'
+import { RootState, useAppDispatch } from '@renderer/store'
+import { setActiveConversationId, toggleCreationAiAssistant } from '@renderer/store/chat-history'
+import { useUnmount } from 'ahooks'
 
 const VaultPage = () => {
   const [searchParams] = useSearchParams()
@@ -26,9 +29,9 @@ const VaultPage = () => {
   const vault = findVaultById(Number(id))
   const content = vault?.content
   const title = vault?.title ? '## ' + vault.title : ''
-  const { isVisible, toggleAIAssistant, hideAIAssistant } = useAIAssistant()
+  const isVisible = useSelector((state: RootState) => state.chatHistory.creation.aiAssistantVisible)
   const { controller, defaultSizes, leftMinSize, rightMinSize } = useAllotment(isVisible)
-
+  const dispatch = useAppDispatch()
   const debouncedSave = useMemo(
     () =>
       debounce((value: string, type: 'content' | 'title' | 'summary' | 'tags') => {
@@ -63,12 +66,17 @@ const VaultPage = () => {
     },
     [debouncedSave]
   )
-
+  const activeConversationId = useSelector((state: RootState) => state.chatHistory.activeConversationId)
+  useUnmount(() => {
+    dispatch(setActiveConversationId(null))
+    dispatch(toggleCreationAiAssistant(false))
+  })
   // Status bar component
   return (
     <div className={`flex flex-row h-full allotmentContainer ${!isVisible ? 'allotment-disabled' : ''}`}>
       <Allotment separator={false} ref={controller} defaultSizes={defaultSizes}>
         <Allotment.Pane minSize={leftMinSize}>
+          <div style={{ height: '8px', appRegion: 'drag' } as React.CSSProperties} />
           <div className="vault-page-container">
             <Card className="vault-card">
               {loading || !vault ? (
@@ -95,11 +103,16 @@ const VaultPage = () => {
                 </>
               )}
             </Card>
-            <AIToggleButton onClick={toggleAIAssistant} isActive={isVisible} />
+            <AIToggleButton onClick={() => dispatch(toggleCreationAiAssistant(true))} isActive={isVisible} />
           </div>
         </Allotment.Pane>
         <Allotment.Pane minSize={rightMinSize}>
-          <AIAssistant visible={isVisible} onClose={hideAIAssistant} />
+          <AIAssistant
+            visible={isVisible}
+            onClose={() => dispatch(toggleCreationAiAssistant(false))}
+            pageName="creation"
+            initConversationId={activeConversationId}
+          />
         </Allotment.Pane>
       </Allotment>
     </div>

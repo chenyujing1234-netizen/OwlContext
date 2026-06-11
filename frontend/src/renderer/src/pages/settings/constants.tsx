@@ -1,7 +1,6 @@
 // Copyright (c) 2025 Beijing Volcano Engine Technology Co., Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import { once } from 'lodash'
 import { ReactNode } from 'react'
 import openAI from '../../assets/images/settings/OpenAI.png'
 import doubao from '../../assets/images/settings/doubao.png'
@@ -14,7 +13,7 @@ export enum ModelTypeList {
 }
 
 export enum embeddingModels {
-  DoubaoEmbeddingModelId = 'doubao-embedding-large-text-240915',
+  DoubaoEmbeddingModelId = 'doubao-embedding-vision-250615',
   OpenAIEmbeddingModelId = 'text-embedding-3-large'
 }
 export enum BaseUrl {
@@ -32,7 +31,7 @@ export interface ModelInfo {
   option?: OptionInfo[]
 }
 
-export const ModelInfoMap = once((): ModelInfo[] => [
+export const ModelInfoList = [
   {
     icon: <img src={doubao} className="!max-w-none w-[24px] h-[24px]" />,
     key: 'Doubao',
@@ -58,16 +57,16 @@ export const ModelInfoMap = once((): ModelInfo[] => [
     value: 'openai',
     option: [
       {
-        value: 'gpt-4.1',
-        label: 'GPT-4.1'
+        value: 'gpt-5',
+        label: 'GPT-5'
       },
       {
-        value: 'gpt-4.1-mini',
-        label: 'GPT-4.1 Mini'
+        value: 'gpt-5-mini',
+        label: 'GPT-5 Mini'
       },
       {
-        value: 'gpt-4.1-nano',
-        label: 'GPT-4.1 Nano'
+        value: 'gpt-5-nano',
+        label: 'GPT-5 Nano'
       }
     ]
   },
@@ -76,4 +75,4 @@ export const ModelInfoMap = once((): ModelInfo[] => [
     key: 'Custom',
     value: 'custom'
   }
-])
+]

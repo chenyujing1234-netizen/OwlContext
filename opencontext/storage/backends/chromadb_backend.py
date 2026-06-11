@@ -10,22 +10,22 @@ Specifically handles ProcessedContext, supports vectorized storage and retrieval
 Creates independent collections for each context_type
 """
 
-from typing import Any, Dict, List, Optional, Tuple
-import json
+import atexit
 import datetime
+import json
+import signal
+import threading
 import time
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
-import signal
-import atexit
-import threading
 
-from opencontext.storage.base_storage import IVectorStorageBackend, StorageType
-from opencontext.models.context import ProcessedContext, Vectorize, ExtractedData, ContextProperties
-from opencontext.models.enums import ContextType, ContentFormat
-from opencontext.utils.logging_utils import get_logger
 from opencontext.llm.global_embedding_client import do_vectorize
+from opencontext.models.context import ContextProperties, ExtractedData, ProcessedContext, Vectorize
+from opencontext.models.enums import ContentFormat, ContextType
+from opencontext.storage.base_storage import IVectorStorageBackend, StorageType
+from opencontext.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -36,10 +36,11 @@ class ChromaDBBackend(IVectorStorageBackend):
     Specializes in handling ProcessedContext, supporting vectorized storage and retrieval.
     Creates a separate collection for each context_type.
     """
-    
+
     def __init__(self):
         self._client: Optional[chromadb.Client] = None
-        self._collections: Dict[str, chromadb.Collection] = {}  # context_type -> collection
+        # context_type -> collection
+        self._collections: Dict[str, chromadb.Collection] = {}
         self._initialized = False
         self._config = None
         self._is_server_mode = False
@@ -49,45 +50,51 @@ class ChromaDBBackend(IVectorStorageBackend):
         self._pending_writes = []  # Pending writes
         self._write_lock = threading.Lock()  # Write lock
         self._cleanup_registered = False
-        
+
         # Register graceful shutdown handler
         self._register_cleanup_handlers()
-    
+
     def _register_cleanup_handlers(self) -> None:
         """Register graceful shutdown handlers"""
         if not self._cleanup_registered:
             # Register exit handler
             atexit.register(self._cleanup)
-            
-            # Register signal handlers
-            signal.signal(signal.SIGTERM, self._signal_handler)
-            signal.signal(signal.SIGINT, self._signal_handler)
-            
+
+            # Register signal handlers (only works in main thread)
+            try:
+                signal.signal(signal.SIGTERM, self._signal_handler)
+                signal.signal(signal.SIGINT, self._signal_handler)
+                logger.debug("ChromaDB signal handlers registered")
+            except ValueError as e:
+                # Signal handlers can only be registered in the main thread
+                logger.debug(f"Cannot register signal handlers (not in main thread): {e}")
+
             self._cleanup_registered = True
             logger.debug("ChromaDB graceful shutdown handlers registered")
-    
+
     def _signal_handler(self, signum, frame):
         """Handle system signals"""
         logger.info(f"Received signal {signum}, safely shutting down ChromaDB...")
         self._cleanup()
-        
+
     def _cleanup(self) -> None:
         """Clean up resources and persist data"""
         try:
             with self._write_lock:
                 # Complete all pending writes
                 if self._pending_writes:
-                    logger.info(f"Completing {len(self._pending_writes)} pending write operations...")
+                    logger.info(
+                        f"Completing {len(self._pending_writes)} pending write operations..."
+                    )
                     self._flush_pending_writes()
-                
 
                 logger.info("Persisting ChromaDB index...")
                 # self._client.persist()
                 logger.info("ChromaDB safely shut down")
-                
+
         except Exception as e:
             logger.error(f"Error during ChromaDB cleanup: {e}")
-    
+
     def _flush_pending_writes(self) -> None:
         """Flush pending write operations"""
         try:
@@ -95,83 +102,97 @@ class ChromaDBBackend(IVectorStorageBackend):
             for write_op in self._pending_writes:
                 try:
                     # Execute write operation
-                    collection = write_op['collection']
+                    collection = write_op["collection"]
                     collection.upsert(
-                        ids=write_op['ids'],
-                        documents=write_op['documents'],
-                        metadatas=write_op['metadatas'],
-                        embeddings=write_op['embeddings']
+                        ids=write_op["ids"],
+                        documents=write_op["documents"],
+                        metadatas=write_op["metadatas"],
+                        embeddings=write_op["embeddings"],
                     )
                     logger.debug(f"Completed pending write: {len(write_op['ids'])} documents")
                 except Exception as e:
                     logger.error(f"Failed to flush write operation: {e}")
-            
+
             # Clear pending writes
             self._pending_writes.clear()
-            
+
         except Exception as e:
             logger.error(f"Failed to flush pending writes: {e}")
-        
+
     def initialize(self, config: Dict[str, Any]) -> bool:
         """Initialize the ChromaDB backend, supporting local persistence and server mode"""
         try:
             self._config = config
-            chroma_config = config.get('config', {})
-            
+            chroma_config = config.get("config", {})
+
             # Check mode configuration
-            mode = chroma_config.get('mode', 'local')
-            
-            if mode == 'server':
+            mode = chroma_config.get("mode", "local")
+
+            if mode == "server":
                 # Server mode
                 self._is_server_mode = True
-                host = chroma_config.get('host', 'localhost')
-                port = chroma_config.get('port', 8000)
-                ssl = chroma_config.get('ssl', False)
-                headers = chroma_config.get('headers', {})
-                settings = chroma_config.get('settings', {})
-                
+                host = chroma_config.get("host", "localhost")
+                port = chroma_config.get("port", 1733)
+                ssl = chroma_config.get("ssl", False)
+                headers = chroma_config.get("headers", {})
+                settings = chroma_config.get("settings", {})
+
                 # Build server URL
                 protocol = "https" if ssl else "http"
                 server_url = f"{protocol}://{host}:{port}"
-                
+
                 logger.info(f"Initializing ChromaDB in server mode: {server_url}")
-                
+
                 # Create HTTP client and test connection
                 self._client = self._create_server_client(host, port, ssl, headers, settings)
-                
+
             else:
                 # Local persistence mode
                 self._is_server_mode = False
                 path = chroma_config.get("path", "./persist/chromadb")
                 logger.info(f"Initializing ChromaDB in local persistence mode: {path}")
-                
+
                 if path:
                     self._client = chromadb.PersistentClient(path=path)
                 else:
                     self._client = chromadb.Client()
-            
+
             # Get all available context_types
             context_types = [ct.value for ct in ContextType]
             config.get("collection_prefix", "opencontext")
-            
+
             # Create a separate collection for each context_type
             for context_type in context_types:
                 collection_name = f"{context_type}"
                 collection = self._client.get_or_create_collection(
                     name=collection_name,
-                    metadata={"hnsw:space": "cosine", "context_type": context_type}
+                    metadata={"hnsw:space": "cosine", "context_type": context_type},
                 )
                 self._collections[context_type] = collection
-            
+
+            # Create dedicated todo collection for deduplication
+            todo_collection = self._client.get_or_create_collection(
+                name="todo",
+                metadata={
+                    "hnsw:space": "cosine",
+                    "description": "Todo embeddings for deduplication",
+                },
+            )
+            self._collections["todo"] = todo_collection
+
             self._initialized = True
-            logger.info(f"ChromaDB vector backend initialized successfully, created {len(self._collections)} collections")
+            logger.info(
+                f"ChromaDB vector backend initialized successfully, created {len(self._collections)} collections"
+            )
             return True
-            
+
         except Exception as e:
             logger.exception(f"ChromaDB vector backend initialization failed: {e}")
             return False
-    
-    def _create_server_client(self, host: str, port: int, ssl: bool, headers: Dict, settings: Dict) -> chromadb.HttpClient:
+
+    def _create_server_client(
+        self, host: str, port: int, ssl: bool, headers: Dict, settings: Dict
+    ) -> chromadb.HttpClient:
         """Create a server client and test the connection"""
         for attempt in range(self._max_retry_count):
             try:
@@ -180,33 +201,37 @@ class ChromaDBBackend(IVectorStorageBackend):
                     port=port,
                     ssl=ssl,
                     headers=headers,
-                    settings=chromadb.Settings(**settings) if settings else None
+                    settings=chromadb.Settings(**settings) if settings else None,
                 )
-                
+
                 # Test connection
                 client.heartbeat()
                 logger.info("ChromaDB server connection successful")
                 self._connection_retry_count = 0
                 return client
-                
+
             except Exception as e:
                 self._connection_retry_count += 1
                 protocol = "https" if ssl else "http"
                 server_url = f"{protocol}://{host}:{port}"
-                
+
                 if attempt < self._max_retry_count - 1:
-                    logger.warning(f"ChromaDB server connection failed (attempt {attempt + 1}/{self._max_retry_count}): {e}, retrying in {self._retry_delay} seconds")
+                    logger.warning(
+                        f"ChromaDB server connection failed (attempt {attempt + 1}/{self._max_retry_count}): {e}, retrying in {self._retry_delay} seconds"
+                    )
                     time.sleep(self._retry_delay)
                     self._retry_delay *= 2  # Exponential backoff
                 else:
-                    logger.error(f"Could not connect to ChromaDB server {server_url} (all retries failed): {e}")
+                    logger.error(
+                        f"Could not connect to ChromaDB server {server_url} (all retries failed): {e}"
+                    )
                     raise RuntimeError(f"ChromaDB server connection failed: {e}")
-    
+
     def _check_connection(self) -> bool:
         """Check connection health"""
         if not self._client:
             return False
-            
+
         if self._is_server_mode:
             try:
                 self._client.heartbeat()
@@ -217,24 +242,24 @@ class ChromaDBBackend(IVectorStorageBackend):
         else:
             # Local mode, assume connection is always available
             return True
-    
+
     def _ensure_connection(self) -> bool:
         """Ensure connection is available, reconnect if necessary"""
         if self._check_connection():
             return True
-            
+
         if self._is_server_mode and self._config:
             logger.info("Attempting to reconnect to ChromaDB server...")
             try:
-                chroma_config = self._config.get('config', {})
-                host = chroma_config.get('host', 'localhost')
-                port = chroma_config.get('port', 8000)
-                ssl = chroma_config.get('ssl', False)
-                headers = chroma_config.get('headers', {})
-                settings = chroma_config.get('settings', {})
-                
+                chroma_config = self._config.get("config", {})
+                host = chroma_config.get("host", "localhost")
+                port = chroma_config.get("port", 1733)
+                ssl = chroma_config.get("ssl", False)
+                headers = chroma_config.get("headers", {})
+                settings = chroma_config.get("settings", {})
+
                 self._client = self._create_server_client(host, port, ssl, headers, settings)
-                
+
                 # Re-initialize collections
                 self._collections.clear()
                 context_types = [ct.value for ct in ContextType]
@@ -242,49 +267,51 @@ class ChromaDBBackend(IVectorStorageBackend):
                     collection_name = f"{context_type}"
                     collection = self._client.get_or_create_collection(
                         name=collection_name,
-                        metadata={"hnsw:space": "cosine", "context_type": context_type}
+                        metadata={"hnsw:space": "cosine", "context_type": context_type},
                     )
                     self._collections[context_type] = collection
-                    
+
                 logger.info("ChromaDB server reconnected successfully")
                 return True
-                
+
             except Exception as e:
                 logger.error(f"ChromaDB server reconnection failed: {e}")
                 return False
-        
+
         return False
-    
+
     def get_name(self) -> str:
         return "chromadb"
-    
+
     def get_collection_names(self) -> Optional[List[str]]:
         return list(self._collections.keys())
-    
+
     def get_storage_type(self) -> StorageType:
         return StorageType.VECTOR_DB
-    
+
     def _ensure_vectorized(self, context: ProcessedContext) -> List[float]:
         """Ensure the context is vectorized, and vectorize it if not"""
         # Check if vector already exists
-        
+
         if not context.vectorize:
             raise ValueError("Not set")
         if context.vectorize.vector:
             return context.vectorize.vector
-        
+
         try:
             do_vectorize(context.vectorize)
             return context.vectorize.vector
         except Exception as e:
             logger.exception(f"Vectorization failed: {e}")
             raise RuntimeError(f"Vectorization failed: {str(e)}")
-    
+
     def _context_to_chroma_format(self, context: ProcessedContext) -> Dict[str, Any]:
         """
         Convert the context object to a document format for storage
         """
-        doc = context.model_dump(exclude_none=True, exclude={'properties', 'extracted_data', 'vectorize', 'metadata'})
+        doc = context.model_dump(
+            exclude_none=True, exclude={"properties", "extracted_data", "vectorize", "metadata"}
+        )
 
         if context.extracted_data:
             extracted_data_dict = context.extracted_data.model_dump(exclude_none=True)
@@ -292,7 +319,7 @@ class ChromaDBBackend(IVectorStorageBackend):
 
         if context.metadata:
             doc.update(context.metadata)
-        
+
         if context.vectorize:
             if context.vectorize.content_format == ContentFormat.TEXT:
                 doc["document"] = context.vectorize.text
@@ -322,20 +349,22 @@ class ChromaDBBackend(IVectorStorageBackend):
             elif isinstance(value, (dict, list)):
                 try:
                     # logger.info(f"Serializing key {key} with value {value}")
-                    doc[key] = json.dumps(value, ensure_ascii=False, default=default_json_serializer)
+                    doc[key] = json.dumps(
+                        value, ensure_ascii=False, default=default_json_serializer
+                    )
                 except (TypeError, ValueError):
                     doc[key] = str(value)
         return doc
-    
+
     def upsert_processed_context(self, context: ProcessedContext) -> str:
         """Store a single ProcessedContext"""
         return self.batch_upsert_processed_context([context])[0]
-    
+
     def batch_upsert_processed_context(self, contexts: List[ProcessedContext]) -> List[str]:
         """Batch store ProcessedContext to the corresponding collection"""
         if not self._initialized:
             raise RuntimeError("ChromaDB backend not initialized")
-        
+
         # Ensure connection is available
         if not self._ensure_connection():
             raise RuntimeError("ChromaDB connection not available")
@@ -346,21 +375,23 @@ class ChromaDBBackend(IVectorStorageBackend):
             if context_type not in contexts_by_type:
                 contexts_by_type[context_type] = []
             contexts_by_type[context_type].append(context)
-        
+
         stored_ids = []
-        
+
         # Batch store to the corresponding collection for each context_type
         for context_type, type_contexts in contexts_by_type.items():
             collection = self._collections.get(context_type)
             if not collection:
-                logger.warning(f"No collection found for context_type '{context_type}', skipping storage")
+                logger.warning(
+                    f"No collection found for context_type '{context_type}', skipping storage"
+                )
                 continue
-            
+
             ids = []
             documents = []
             metadatas = []
             embeddings = []
-            
+
             for context in type_contexts:
                 try:
                     # Ensure vectorization
@@ -368,56 +399,57 @@ class ChromaDBBackend(IVectorStorageBackend):
                     # Convert format
                     chroma_format = self._context_to_chroma_format(context)
                     # Separate id, document, embedding and metadata from the flattened document
-                    doc_id = chroma_format.pop('id')
-                    document = chroma_format.pop('document', '')
-                    embedding = chroma_format.pop('embedding', vector)
+                    doc_id = chroma_format.pop("id")
+                    document = chroma_format.pop("document", "")
+                    embedding = chroma_format.pop("embedding", vector)
                     # The rest are metadata
                     metadata = chroma_format
-                    
+
                     ids.append(doc_id)
                     documents.append(document)
                     metadatas.append(metadata)
                     embeddings.append(embedding)
-                    
+
                 except Exception as e:
                     logger.exception(f"Failed to process context {context.id}: {e}")
                     continue
-            
+
             if not ids:
                 continue
-            
+
             try:
                 with self._write_lock:
                     collection.upsert(
-                        ids=ids,
-                        documents=documents,
-                        metadatas=metadatas,
-                        embeddings=embeddings
+                        ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings
                     )
                     stored_ids.extend(ids)
-                    
+
                     # Persist immediately to prevent data loss
-                    if self._client and hasattr(self._client, 'persist'):
+                    if self._client and hasattr(self._client, "persist"):
                         self._client.persist()
-                
+
             except Exception as e:
                 logger.error(f"Batch storing context to {context_type} collection failed: {e}")
-                
+
                 # If write fails, record pending writes for later retry
                 with self._write_lock:
-                    self._pending_writes.append({
-                        'collection': collection,
-                        'ids': ids,
-                        'documents': documents,
-                        'metadatas': metadatas,
-                        'embeddings': embeddings,
-                        'context_type': context_type
-                    })
+                    self._pending_writes.append(
+                        {
+                            "collection": collection,
+                            "ids": ids,
+                            "documents": documents,
+                            "metadatas": metadatas,
+                            "embeddings": embeddings,
+                            "context_type": context_type,
+                        }
+                    )
                 continue
-        
+
         return stored_ids
-    
-    def get_processed_context(self, id: str, context_type: str, need_vector: bool = False) -> Optional[ProcessedContext]:
+
+    def get_processed_context(
+        self, id: str, context_type: str, need_vector: bool = False
+    ) -> Optional[ProcessedContext]:
         """Get ProcessedContext by ID"""
         if not self._initialized:
             return None
@@ -426,85 +458,104 @@ class ChromaDBBackend(IVectorStorageBackend):
             return None
         # Search in all collections
         try:
-            result = self._collections[context_type].get(
-                ids=[id], 
-                include=["metadatas", "documents", "embeddings"] if need_vector else ["metadatas", "documents"]
-            )
-            
-            if result and result['ids']:
+            with self._write_lock:
+                result = self._collections[context_type].get(
+                    ids=[id],
+                    include=(
+                        ["metadatas", "documents", "embeddings"]
+                        if need_vector
+                        else ["metadatas", "documents"]
+                    ),
+                )
+
+            if result and result["ids"]:
                 doc = {
-                    'id': result['ids'][0],
-                    'document': result['documents'][0],
-                    'metadata': result['metadatas'][0],
+                    "id": result["ids"][0],
+                    "document": result["documents"][0],
+                    "metadata": result["metadatas"][0],
                 }
                 if need_vector:
-                    doc['embedding'] = result['embeddings'][0]
+                    doc["embedding"] = result["embeddings"][0]
                 return self._chroma_result_to_context(doc)
-            
+
         except Exception as e:
             logger.debug(f"Failed to search context {id} in {context_type} collection: {e}")
             return None
 
-    def get_all_processed_contexts(self, 
-                                  context_types: Optional[List[str]] = None,
-                                  limit: int = 100, offset: int = 0, 
-                                  filter: Optional[Dict[str, Any]] = None,
-                                  need_vector: bool = False) -> Dict[str, List[ProcessedContext]]:
+    def get_all_processed_contexts(
+        self,
+        context_types: Optional[List[str]] = None,
+        limit: int = 100,
+        offset: int = 0,
+        filter: Optional[Dict[str, Any]] = None,
+        need_vector: bool = False,
+    ) -> Dict[str, List[ProcessedContext]]:
         """Get all ProcessedContexts, grouped by context_type"""
         if not self._initialized:
             return {}
-        
+
         result = {}
         if not context_types:
             context_types = list(self._collections.keys())
-        
+
         for context_type in context_types:
             if context_type not in self._collections:
                 continue
             collection = self._collections[context_type]
             try:
                 where_clause = self._build_where_clause(filter)
-                
+
                 # ChromaDB's get method does not directly support offset, so pagination needs to be implemented in other ways
-                results = collection.get(
-                    limit=limit + offset,  # Get more data to simulate offset
-                    where=where_clause,
-                    include=["metadatas", "documents", "embeddings"] if need_vector else ["metadatas", "documents"]
-                )
-                
+                with self._write_lock:
+                    results = collection.get(
+                        limit=limit + offset,  # Get more data to simulate offset
+                        where=where_clause,
+                        include=(
+                            ["metadatas", "documents", "embeddings"]
+                            if need_vector
+                            else ["metadatas", "documents"]
+                        ),
+                    )
+
                 contexts = []
-                if results and results['ids']:
+                if results and results["ids"]:
                     # Manually apply offset
-                    start_idx = min(offset, len(results['ids']))
-                    end_idx = min(start_idx + limit, len(results['ids']))
-                    
+                    start_idx = min(offset, len(results["ids"]))
+                    end_idx = min(start_idx + limit, len(results["ids"]))
+
                     for i in range(start_idx, end_idx):
                         doc = {
-                            'id': results['ids'][i],
-                            'document': results['documents'][i],
-                            'metadata': results['metadatas'][i],
+                            "id": results["ids"][i],
+                            "document": results["documents"][i],
+                            "metadata": results["metadatas"][i],
                         }
                         if need_vector:
-                            doc['embedding'] = results['embeddings'][i]
+                            doc["embedding"] = results["embeddings"][i]
                         context = self._chroma_result_to_context(doc, need_vector)
                         if context:
                             contexts.append(context)
-                
+
                 if contexts:
                     result[context_type] = contexts
-                        
+
             except Exception as e:
                 logger.exception(f"Failed to get contexts from {context_type} collection: {e}")
                 continue
-        
+
         return result
 
     def delete_processed_context(self, id: str, context_type: str) -> bool:
         """Delete ProcessedContext by ID"""
         return self.delete_contexts([id], context_type)
-    
-    def search(self, query: Vectorize, top_k: int = 10, context_types: Optional[List[str]] = None,
-              filters: Optional[Dict[str, Any]] = None, need_vector: bool = False) -> List[Tuple[ProcessedContext, float]]:
+
+    def search(
+        self,
+        query: Vectorize,
+        top_k: int = 10,
+        context_types: Optional[List[str]] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        need_vector: bool = False,
+    ) -> List[Tuple[ProcessedContext, float]]:
         """Vector search for ProcessedContext"""
         if not self._initialized:
             return []
@@ -531,49 +582,62 @@ class ChromaDBBackend(IVectorStorageBackend):
         if not query_vector:
             logger.warning("Unable to get query vector, search failed")
             return []
-        
+
         all_results = []
-        
+
         for context_type, collection in target_collections.items():
             try:
                 # Check if collection is empty
                 try:
-                    count = collection.count()
+                    with self._write_lock:
+                        count = collection.count()
                     if count == 0:
                         continue
                 except Exception as count_error:
-                    logger.debug(f"Unable to get count for collection '{context_type}': {count_error}")
+                    logger.debug(
+                        f"Unable to get count for collection '{context_type}': {count_error}"
+                    )
                     # If count fails, collection has issues, skip
                     continue
-                
+
                 where_clause = self._build_where_clause(filters)
-                
-                results = collection.query(
-                    query_embeddings=[query_vector],
-                    n_results=top_k,
-                    where=where_clause,
-                    include=["metadatas", "documents", "distances", "embeddings"] if need_vector else ["metadatas", "documents", "distances"]
-                )
-                
-                if results and results['ids'][0]:
-                    for i in range(len(results['ids'][0])):
+
+                with self._write_lock:
+                    results = collection.query(
+                        query_embeddings=[query_vector],
+                        n_results=top_k,
+                        where=where_clause,
+                        include=(
+                            ["metadatas", "documents", "distances", "embeddings"]
+                            if need_vector
+                            else ["metadatas", "documents", "distances"]
+                        ),
+                    )
+
+                if results and results["ids"][0]:
+                    for i in range(len(results["ids"][0])):
                         doc = {
-                            'id': results['ids'][0][i],
-                            'document': results['documents'][0][i],
-                            'metadata': results['metadatas'][0][i],
+                            "id": results["ids"][0][i],
+                            "document": results["documents"][0][i],
+                            "metadata": results["metadatas"][0][i],
                         }
                         if need_vector:
-                            doc['embedding'] = results['embeddings'][0][i]
+                            doc["embedding"] = results["embeddings"][0][i]
                         context = self._chroma_result_to_context(doc, need_vector)
                         if context:
-                            distance = results['distances'][0][i]
+                            distance = results["distances"][0][i]
                             score = 1 - distance  # Convert to similarity score
                             all_results.append((context, score))
-                        
+
             except Exception as e:
                 # Special handling for HNSW index errors
-                if "hnsw segment reader" in str(e).lower() or "nothing found on disk" in str(e).lower():
-                    logger.error(f"Collection '{context_type}' index not initialized (no data), skipping search: {e}")
+                if (
+                    "hnsw segment reader" in str(e).lower()
+                    or "nothing found on disk" in str(e).lower()
+                ):
+                    logger.error(
+                        f"Collection '{context_type}' index not initialized (no data), skipping search: {e}"
+                    )
                     continue
                 else:
                     logger.exception(f"Vector search failed in {context_type} collection: {e}")
@@ -583,11 +647,13 @@ class ChromaDBBackend(IVectorStorageBackend):
         all_results.sort(key=lambda x: x[1], reverse=True)
         # logger.info(f"Found {len(all_results)} results, returning top {top_k}")
         return all_results[:top_k]
-    
-    def _chroma_result_to_context(self, doc: Dict[str, Any], need_vector: bool = True) -> Optional[ProcessedContext]:
+
+    def _chroma_result_to_context(
+        self, doc: Dict[str, Any], need_vector: bool = True
+    ) -> Optional[ProcessedContext]:
         """Convert ChromaDB query result to ProcessedContext"""
         try:
-            if not doc.get('id'):
+            if not doc.get("id"):
                 logger.warning("ChromaDB result missing id field")
                 return None
             extracted_data_field_names = set(ExtractedData.model_fields.keys())
@@ -601,23 +667,24 @@ class ChromaDBBackend(IVectorStorageBackend):
             metadata_dict = {}
 
             # All fields are now at the same level
-            document = doc.pop('document', None)
-            embedding = doc.pop('embedding', None)
-            metadata = doc.pop('metadata', {})
-            doc_id = doc.pop('id')
+            document = doc.pop("document", None)
+            embedding = doc.pop("embedding", None)
+            metadata = doc.pop("metadata", {})
+            doc_id = doc.pop("id")
 
             # Process vectorize data
             if document:
-                vectorize_dict['text'] = document
-            vectorize_dict['vector'] = embedding
+                vectorize_dict["text"] = document
+            vectorize_dict["vector"] = embedding
 
             # Determine metadata fields based on context_type
             metadata_field_names = set()
-            context_type_value = metadata.get('context_type')
-            
+            context_type_value = metadata.get("context_type")
+
             if context_type_value == ContextType.ENTITY_CONTEXT.value:
                 # Import ProfileContextMetadata to get its field names
                 from opencontext.models.context import ProfileContextMetadata
+
                 metadata_field_names = set(ProfileContextMetadata.model_fields.keys())
             # Other context_types can add corresponding metadata models here
             # elif context_type_value == ContextType.ACTIVITY_CONTEXT.value:
@@ -627,12 +694,12 @@ class ChromaDBBackend(IVectorStorageBackend):
             # Reconstruct objects from flattened fields
             for key, value in metadata.items():
                 # timestamp fields are redundant
-                if key.endswith('_ts'):
+                if key.endswith("_ts"):
                     continue
 
                 # Try to deserialize if it looks like a JSON string
                 val = value
-                if isinstance(value, str) and value.startswith(('{', '[')):
+                if isinstance(value, str) and value.startswith(("{", "[")):
                     try:
                         val = json.loads(value)
                     except (json.JSONDecodeError, TypeError):
@@ -652,14 +719,14 @@ class ChromaDBBackend(IVectorStorageBackend):
 
             # logger.info(f"extracted_data_dict: {extracted_data_dict}")
             # Create the nested Pydantic models and add them to the main context dict
-            context_dict['id'] = doc_id
-            context_dict['extracted_data'] = ExtractedData.model_validate(extracted_data_dict)
-            context_dict['properties'] = ContextProperties.model_validate(properties_dict)
-            context_dict['vectorize'] = Vectorize.model_validate(vectorize_dict)
+            context_dict["id"] = doc_id
+            context_dict["extracted_data"] = ExtractedData.model_validate(extracted_data_dict)
+            context_dict["properties"] = ContextProperties.model_validate(properties_dict)
+            context_dict["vectorize"] = Vectorize.model_validate(vectorize_dict)
 
             # If there are metadata fields, add to context_dict
             if metadata_dict:
-                context_dict['metadata'] = metadata_dict
+                context_dict["metadata"] = metadata_dict
             # Validate the final ProcessedContext object
             context = ProcessedContext.model_validate(context_dict)
             if not need_vector:
@@ -669,7 +736,7 @@ class ChromaDBBackend(IVectorStorageBackend):
         except Exception as e:
             logger.exception(f"Failed to convert ChromaDB result to ProcessedContext: {e}")
             return None
-    
+
     def _build_where_clause(self, filters: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Build ChromaDB where query conditions"""
         if not filters:
@@ -678,14 +745,14 @@ class ChromaDBBackend(IVectorStorageBackend):
         where_conditions = []
 
         for key, value in filters.items():
-            if key == 'context_type':
+            if key == "context_type":
                 # context_type is selected through collection, skip here
                 continue
-            elif key == 'entities':
+            elif key == "entities":
                 continue
             elif not value:
                 continue
-            elif key.endswith('_ts') and isinstance(value, dict):
+            elif key.endswith("_ts") and isinstance(value, dict):
                 # Time range query
                 if "$gte" in value:
                     where_conditions.append({key: {"$gte": value["$gte"]}})
@@ -702,7 +769,7 @@ class ChromaDBBackend(IVectorStorageBackend):
             return where_conditions[0]
         else:
             return {"$and": where_conditions}
-    
+
     def delete_contexts(self, ids: List[str], context_type: str) -> bool:
         """Delete contexts of specified type"""
         if not self._initialized:
@@ -713,7 +780,8 @@ class ChromaDBBackend(IVectorStorageBackend):
 
         collection = self._collections[context_type]
         try:
-            collection.delete(ids=ids)
+            with self._write_lock:
+                collection.delete(ids=ids)
             return True
         except Exception as e:
             logger.exception(f"Failed to delete ChromaDB contexts: {e}")
@@ -730,7 +798,8 @@ class ChromaDBBackend(IVectorStorageBackend):
         try:
             collection = self._collections[context_type]
             # Use count method to get the number of documents in the collection
-            count = collection.count()
+            with self._write_lock:
+                count = collection.count()
             return count
         except Exception as e:
             logger.warning(f"Failed to get record count for {context_type}: {e}")
@@ -746,3 +815,127 @@ class ChromaDBBackend(IVectorStorageBackend):
             result[context_type] = self.get_processed_context_count(context_type)
 
         return result
+
+    def upsert_todo_embedding(
+        self,
+        todo_id: int,
+        content: str,
+        embedding: List[float],
+        metadata: Optional[Dict] = None,
+    ) -> bool:
+        """Store todo embedding to vector database for deduplication"""
+        if not self._initialized:
+            logger.warning("ChromaDB not initialized, cannot store todo embedding")
+            return False
+
+        try:
+            collection = self._collections.get("todo")
+            if not collection:
+                logger.error("Todo collection not found")
+                return False
+
+            # Prepare metadata
+            meta = {
+                "todo_id": todo_id,
+                "content": content,
+                "created_at": datetime.datetime.now().isoformat(),
+            }
+            if metadata:
+                meta.update(metadata)
+
+            # Store to vector database
+            with self._write_lock:
+                collection.upsert(
+                    ids=[f"todo_{todo_id}"],
+                    embeddings=[embedding],
+                    metadatas=[meta],
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to store todo embedding (id={todo_id}): {e}")
+            return False
+
+    def search_similar_todos(
+        self,
+        query_embedding: List[float],
+        top_k: int = 10,
+        similarity_threshold: float = 0.85,
+    ) -> List[Tuple[int, str, float]]:
+        """Search for similar todos using vector similarity
+
+        Args:
+            query_embedding: Query embedding vector
+            top_k: Maximum number of results to return
+            similarity_threshold: Minimum similarity threshold (0-1)
+
+        Returns:
+            List of (todo_id, content, similarity_score) tuples
+        """
+        if not self._initialized:
+            logger.warning("ChromaDB not initialized, cannot search todos")
+            return []
+
+        try:
+            collection = self._collections.get("todo")
+            if not collection:
+                logger.error("Todo collection not found")
+                return []
+
+            # Check if collection is empty
+            with self._write_lock:
+                count = collection.count()
+            if count == 0:
+                logger.debug("Todo collection is empty, no similar todos found")
+                return []
+
+            # Query vector database
+            with self._write_lock:
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=min(top_k, count),
+                    include=["metadatas", "distances"],
+                )
+
+            similar_todos = []
+            if results and results["ids"] and results["ids"][0]:
+                for i in range(len(results["ids"][0])):
+                    distance = results["distances"][0][i]
+                    similarity = 1 - distance  # Convert distance to similarity
+
+                    if similarity >= similarity_threshold:
+                        metadata = results["metadatas"][0][i]
+                        similar_todos.append(
+                            (
+                                metadata["todo_id"],
+                                metadata["content"],
+                                similarity,
+                            )
+                        )
+            return similar_todos
+
+        except Exception as e:
+            logger.error(f"Failed to search similar todos: {e}")
+            return []
+
+    def delete_todo_embedding(self, todo_id: int) -> bool:
+        """Delete todo embedding from vector database"""
+        if not self._initialized:
+            logger.warning("ChromaDB not initialized, cannot delete todo embedding")
+            return False
+
+        try:
+            collection = self._collections.get("todo")
+            if not collection:
+                logger.error("Todo collection not found")
+                return False
+
+            with self._write_lock:
+                collection.delete(ids=[f"todo_{todo_id}"])
+            logger.debug(f"Deleted todo embedding: id={todo_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete todo embedding (id={todo_id}): {e}")
+            return False

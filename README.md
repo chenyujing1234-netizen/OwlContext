@@ -4,11 +4,13 @@
   <img alt="MineContext" src="src/MineContext-Banner.svg" width="100%" height="auto">
 </picture>
 
-### MineContext：Create with Context,Clarity from Chaos
+### MineContext: Create with Context, Clarity from Chaos
 
-An open-source,proactive context-aware AI partner,dedicated to bringing clarity and efficiency to your work, study and creation.
+An open-source, proactive context-aware AI partner, dedicated to bringing clarity and efficiency to your work, study and creation.
 
-<a href="https://github.com/volcengine/MineContext/issues">Report Issues</a> · <a href="https://bytedance.larkoffice.com/share/base/form/shrcnPAjJtlufuhBZGegll41NOh">Feedback</a>
+[中文](README_zh.md) / English
+
+<a href="https://bytedance.larkoffice.com/wiki/Hn6ewRnAwiSro7kkH6Sc1DMFnng">Community Best Practice</a> · <a href="https://github.com/volcengine/MineContext/issues">Report Issues</a> · <a href="https://bytedance.larkoffice.com/share/base/form/shrcnPAjJtlufuhBZGegll41NOh">Feedback</a>
 
 [![][release-shield]][release-link]
 [![][github-stars-shield]][github-stars-link]
@@ -18,13 +20,13 @@ An open-source,proactive context-aware AI partner,dedicated to bringing clarity 
 [![][last-commit-shield]][last-commit-shield-link]
 [![][wechat-shield]][wechat-shield-link]
 
-[中文](README_zh.md) / English
+<a href="https://trendshift.io/repositories/15157" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15157" alt="volcengine%2FMineContext | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 👋 Join our [WeChat / Lark / Red Note Group](https://bytedance.larkoffice.com/wiki/Hg6VwrxnTiXtWUkgHexcFTqrnpg)
 
 🌍 Join our [Discord Group](https://discord.gg/tGj7RQ3nUR)
 
-[App Download for Mac](https://github.com/volcengine/MineContext/releases/download/0.1.1/MineContext-0.1.1.dmg)
+<a href="https://github.com/volcengine/MineContext/releases/download/v0.1.8/MineContext-0.1.8.dmg">🖥️ Download for Mac</a> · <a href="https://github.com/volcengine/MineContext/releases/download/v0.1.8/MineContext-0.1.8-setup.exe">💻 Download for Windows</a>
 
 </div>
 
@@ -32,18 +34,21 @@ Table of Contents
 
 - [👋🏻 What is MineContext](#-what-is-minecontext)
 - [🚀 Key Features](#-key-features)
+- [🔏 Privacy Protection](#-privacy-protection)
+  - [Local-First](#local-first)
+  - [Local AI model](#local-ai-model)
 - [🏁 Quick Start](#-quick-start)
   - [1. Installation](#1-installation)
-  - [2. Disable the quarantine attribute](#2-disable-the-quarantine-attribute)
-  - [3. Enter Your API Key](#3-enter-your-api-key)
-  - [4. Start Recording](#4-start-recording)
-  - [5. Forget it](#5-forget-it)
-- [🎃 Contribution Guidelines](#-contribution-guidelines)
-
+  - [2. Enter Your API Key](#2-enter-your-api-key)
+  - [3. Start Recording](#3-start-recording)
+  - [4. Forget it](#4-forget-it)
+  - [5. Backend Debugging](#5-backend-debugging)
+- [🎃 Contribution Guide](#-contribution-guide)
   - [🎨 Frontend Architecture](#-frontend-architecture)
     - [Core Tech Stack](#core-tech-stack)
     - [Core Architecture](#core-architecture)
   - [💻 Frontend Usage](#-frontend-usage)
+    - [Build Backend](#build-backend)
     - [Install Dependencies](#install-dependencies)
     - [Development and Debugging](#development-and-debugging)
     - [Application Packaging](#application-packaging)
@@ -54,12 +59,11 @@ Table of Contents
     - [Installation](#installation)
     - [Configuration](#configuration)
     - [Running the Server](#running-the-server)
-
 - [💎 The Philosophy Behind the Name](#-the-philosophy-behind-the-name)
 - [🎯 Target User](#-target-user)
 - [🔌 Context-Source](#-context-source)
 - [🆚 Comparison with Familiar Application](#-comparison-with-familiar-application)
-  - [MineContext vs ChatGPT Pulse](#minecontext--vs-chatgpt-pulse)
+  - [MineContext vs ChatGPT Pulse](#minecontext-vs-chatgpt-pulse)
   - [MineContext vs Dayflow](#minecontext-vs-dayflow)
 - [👥 Community](#-community)
   - [Community and Support](#community-and-support)
@@ -68,15 +72,19 @@ Table of Contents
 
 <br>
 
-## 👋🏻 What is MineContext
+> **🔗 Related Project**: Check out **[OpenViking](https://github.com/volcengine/OpenViking)** - An open-source Context Database designed for AI Agents. OpenViking unifies Memories, Resources, and Skills through a "file system paradigm", providing the infrastructure layer for sophisticated context management.
+
+<br>
+
+# 👋🏻 What is MineContext
 
 MineContext is a proactive context-aware AI partner. By utilizing screenshots and content comprehension (with future support for multi-source multimodal information including documents, images, videos, code, and external application data), it can see and understand the user's digital world context. Based on an underlying contextual engineering framework, it actively delivers high-quality information such as insights, daily/weekly summaries, to-do lists, and activity records.
 
 ![feature.gif](src/feature.gif)
 
-## 🚀 Key Features
+# 🚀 Key Features
 
-MineContext focuses on five key features: effortless collection, intelligent resurfacing, and proactive delivery.
+MineContext focuses on four key features: effortless collection, intelligent resurfacing, proactive delivery, and a context engineering architecture.
 
 1. 📥 Effortless Collection
    Capable of gathering and processing massive amounts of context. Designed storage management enables extensive collection without adding mental burden.
@@ -84,30 +92,34 @@ MineContext focuses on five key features: effortless collection, intelligent res
    Delivers key information and insights proactively in daily use. It extracts summarized content from your context—such as daily/weekly summaries, tips, and todos—and pushes them directly to your homepage.
 3. 💡 Intelligent Resurfacing
    Surfaces relevant and useful context intelligently during creation. Ensures assisted creativity without overwhelming you with information.
-4. 🛡️ Privacy-First
-   All data is stored locally, ensuring your privacy and security.
-5. 🎯 Context Engineering Architecture
+4. 🎯 Context Engineering Architecture
    Supports the complete lifecycle of multimodal, multi-source data—from capture, processing, and storage to management, retrieval, and consumption—enabling the generation of six types of intelligent context.
 
-## 🏁 Quick Start
+# 🔏 Privacy Protection
 
-### 1. Installation
+## Local-First
+
+MineContext places a high priority on user privacy. By default, all data is stored locally in the following path to ensure your privacy and security.
+
+```
+~/Library/Application Support/MineContext/Data
+```
+
+## Local AI model
+
+In addition, we support custom model services based on the OpenAI API protocol. You can use fully local models in MineContext, ensuring that any data does not leave your local environment.
+
+# 🏁 Quick Start
+
+## 1. Installation
 
 Click [Github Latest Release](https://github.com/volcengine/MineContext/releases) to Download
 
 ![Download APP](src/Download-App.gif)
 
-### 2. Disable the quarantine attribute
+> **Note**: Starting from v0.1.5, MineContext supports Apple notarization, so you no longer need to disable the quarantine attribute. If you're using an older version, please refer to the [previous documentation](https://github.com/volcengine/MineContext/blob/0.1.4/README.md) for instructions.
 
-Enter the following command in the terminal to disable the quarantine attribute before running the application.
-
-```
-sudo xattr -d com.apple.quarantine "/Applications/MineContext.app"
-```
-
-![Quarantine](src/Quarantine.gif)
-
-### 3. Enter Your API Key
+## 2. Enter Your API Key
 
 After the application launches, please follow the prompts to enter your API key. (Note: On the first run, the application needs to install the backend environment, which may take about two minutes).
 
@@ -122,29 +134,28 @@ After obtaining the Doubao API Key, you need to activate two models in the [Mode
 - Visual Language Model: Doubao-Seed-1.6-flash
   ![doubao-vlm-model](src/doubao-vlm-model.png)
 
-- Embedding Model: Doubao-embedding-large
+- Embedding Model: Doubao-embedding-vision
   ![doubao-emb-model](src/doubao-emb-model.png)
 
 The following is the filling process after obtaining the API Key:
 
 ![Enter API Key](src/Enter-API-Key.gif)
 
-### 4. Start Recording
+## 3. Start Recording
 
-Enter 【Screen Monitor】 to enable the system permissions for screen sharing. After completing the setup, you need to restart the application for the changes to take effect.
+Enter [Screen Monitor] to enable the system permissions for screen sharing. After completing the setup, you need to restart the application for the changes to take effect.
 ![Enable-Permissions](src/Enable-Permissions.gif)
 
-After restarting the application, please first set your screen sharing area in 【Settings】, then click [Start Recording] to begin taking screenshots.
+After restarting the application, please first set your screen sharing area in [Settings], then click [Start Recording] to begin taking screenshots.
 ![Screen-Settings](src/Screen-Settings.gif)
 
-### 5. Forget it
+## 4. Forget it
 
 After starting the recording, your context will gradually be collected. It will take some time to generate value. So, forget about it and focus on other tasks with peace of mind. MineContext will generate to-dos, prompts, summaries, and activities for you in the background. Of course, you can also engage in proactive Q&A through [Chat with AI].
-Of course, here is the English translation of the provided text:
 
-### 6. Backend Debugging
+## 5. Backend Debugging
 
-MineContext supports backend debugging, which can be accessed at `http://localhost:8000`.
+MineContext supports backend debugging, which can be accessed at `http://localhost:1733`.
 
 1.View Token Consumption and Usage
 ![后台调试1](src/backend-web-1.png)
@@ -154,6 +165,8 @@ MineContext supports backend debugging, which can be accessed at `http://localho
 
 3.Adjust System Prompt for Automated Tasks
 ![后台调试3](src/backend-web-3.png)
+
+# 🎃 Contribution Guide
 
 ## 🎨 Frontend Architecture
 
@@ -218,6 +231,16 @@ frontend/
 
 ## 💻 Frontend Usage
 
+### Build Backend
+
+Before starting frontend development, you need to build the backend first:
+
+```bash
+uv sync
+source .venv/bin/activate
+./build.sh
+```
+
 ### Install Dependencies
 
 Due to package version issues, using a domestic PyPI mirror is not currently supported. Please run the following command to ensure you are using the original PyPI source:
@@ -225,7 +248,7 @@ Due to package version issues, using a domestic PyPI mirror is not currently sup
 ```bash
 pip config unset global.index-url
 cd frontend
-./start-dev.sh
+pnpm install
 ```
 
 ### Development and Debugging
@@ -233,36 +256,20 @@ cd frontend
 During local development, it is normal for the screen capture area selection to be slow. Please wait, as this issue does not exist in the packaged application.
 
 ```bash
-cd frontend
-pnpm install
 pnpm dev
 ```
 
-💡 **Tip:** It is recommended to use `./start-dev.sh` each time you start the frontend. This script ensures that a stable version of Node.js is used and configures the basic runtime environment.
-
 ### Application Packaging
 
-To build executable files for different platforms:
+To build APP for macOS:
 
-- **macOS**
+```bash
+pnpm build:mac
+# Data Path
+# ～/Library/Application\ Support/MineContext
+```
 
-  ```bash
-  pnpm build:mac
-  ```
-
-- **Windows**
-
-  ```bash
-  pnpm build:win
-  ```
-
-- **Linux**
-
-  ```bash
-  pnpm build:linux
-  ```
-
-  The executable files generated by the packaging process will be stored in the `MineContext/frontend/dist` directory.
+The executable files generated by the packaging process will be stored in the `MineContext/frontend/dist` directory.
 
 ## 🏗️ Backend Architecture
 
@@ -354,7 +361,7 @@ server:
 embedding_model:
   provider: doubao # options: openai, doubao
   api_key: your-api-key
-  model: doubao-embedding-large-text-240915
+  model: doubao-embedding-vision-250615
 
 vlm_model:
   provider: doubao # options: openai, doubao
@@ -382,14 +389,14 @@ uv run opencontext start
 uv run opencontext start --config /path/to/config.yaml
 
 # Start with custom port (useful for avoiding conflicts)
-uv run opencontext start --port 8000
+uv run opencontext start --port 1733
 ```
 
 **Available Options:**
 
 - `--config`: Path to configuration file
 - `--host`: Host address (default: from config or `localhost`)
-- `--port`: Port number (default: from config or `8000`)
+- `--port`: Port number (default: from config or `1733`)
 
 **Priority**: Command-line arguments > Config file > Default values
 
@@ -398,16 +405,16 @@ Alternatively, you can activate the virtual environment manually:
 ```bash
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e .
-opencontext start --port 8000
+opencontext start --port 1733
 ```
 
-## 💎 The Philosophy Behind the Name
+# 💎 The Philosophy Behind the Name
 
 The naming of MineContext also reflects the team's ingenuity. It signifies both "my context" and "mining context." It draws inspiration from the core philosophy of Minecraft—openness, creativity, and exploration.
 
 If vast amounts of context are like scattered "blocks," then MineContext provides a "world" where you can freely build, combine, and create. Users can reimagine and create new content based on the collected massive context and generate high-quality information.
 
-## 🎯 Target User
+# 🎯 Target User
 
 | Target User Category | Specific Roles/Identities          | Core Needs/Pain Points                                                                                   |
 | -------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -416,7 +423,7 @@ If vast amounts of context are like scattered "blocks," then MineContext provide
 | Lifelong Learners    | Students, Researchers              | Building systematic knowledge systems, efficiently managing and connecting learning materials            |
 | Project Managers     | Product Managers, Project Managers | Integrating multi-source information and data, ensuring project alignment and decision-making efficiency |
 
-## 🔌 Context-Source
+# 🔌 Context-Source
 
 We will prioritize the expansion of Context Sources according to the following plan, and we warmly welcome everyone to actively contribute code to our efforts.
 
@@ -461,9 +468,9 @@ We will prioritize the expansion of Context Sources according to the following p
 | Smart Glasses Data Sync      | Physical World Interaction Records        | P5       |                   |
 | Smart Bracelet Data Sync     | Physiological Data                        | P5       |                   |
 
-## 🆚 Comparison with Familiar Application
+# 🆚 Comparison with Familiar Application
 
-### MineContext vs ChatGPT Pulse
+## MineContext vs ChatGPT Pulse
 
 - 🖥️ Comprehensive Digital Context:
   MineContext captures your entire digital workflow by reading from screen screenshots, providing a rich, visual context of your daily activities and applications. ChatGPT Pulse, in contrast, is limited to the context of a single text-based conversation.
@@ -476,10 +483,10 @@ We will prioritize the expansion of Context Sources according to the following p
 - 💰 Cost-Effective API Usage:
   MineContext avoids the need for a costly $200/month Pro subscription by allowing you to use your own API key, giving you full control over your spending. ChatGPT Pulse's advanced features are locked behind its expensive premium tier.
 
-### MineContext vs Dayflow
+## MineContext vs Dayflow
 
 - 💡 Richer, Proactive Insights:
-  ineContext delivers a more diverse range of automated, intelligent content—including concise summaries, actionable todos, and contextual tips—going beyond basic activity tracking. DayFlow primarily focuses on logging user activity.
+  MineContext delivers a more diverse range of automated, intelligent content—including concise summaries, actionable todos, and contextual tips—going beyond basic activity tracking. DayFlow primarily focuses on logging user activity.
 - 🧠 Context-Aware Q&A & Creation:
   MineContext enables you to ask questions and generate new content based on your captured context, unlocking wider application scenarios like content drafting and project planning. DayFlow is limited to passive activity recording and review.
 - ✨ Superior Activity Generation & Experience:
@@ -487,19 +494,19 @@ We will prioritize the expansion of Context Sources according to the following p
 
 <br>
 
-## 👥 Community
+# 👥 Community
 
-### Community and Support
+## Community and Support
 
 - [GitHub Issues](https://github.com/volcengine/MineContext/issues): Errors and issues encountered while using MineContext.
 - [Email Support](mailto:minecontext@bytedance.com): Feedback and questions about using MineContext.
 - <a href="https://bytedance.larkoffice.com/wiki/Hg6VwrxnTiXtWUkgHexcFTqrnpg">WeChat Group</a>: Discuss SwanLab usage and share the latest AI technologies.
 
-## Star History
+# Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=volcengine/MineContext&type=Timeline)](https://www.star-history.com/#volcengine/MineContext&Timeline)
 
-## 📃 License
+# 📃 License
 
 This repository is licensed under the Apache 2.0 License.
 

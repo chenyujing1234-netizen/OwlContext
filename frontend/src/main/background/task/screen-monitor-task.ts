@@ -1,3 +1,4 @@
+import { ScreenSettings } from './../../../renderer/src/store/setting';
 import { CaptureSource } from '@interface/common/source'
 import { IpcServerPushChannel } from '@shared/ipc-server-push-channel'
 import { BrowserWindow, ipcMain } from 'electron'
@@ -15,6 +16,8 @@ import isBetween from 'dayjs/plugin/isBetween'
 import customParseFormat from 'dayjs/plugin/customParseFormat'
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter'
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore'
+import { ScheduleNextTask } from './schedule-next-task'
+
 dayjs.extend(isBetween)
 dayjs.extend(customParseFormat)
 dayjs.extend(isSameOrAfter)
@@ -22,44 +25,14 @@ dayjs.extend(isSameOrBefore)
 const queue = new PQueue({ concurrency: 3 })
 
 const logger = getLogger('ScreenMonitorTask')
-class ScheduleNextTask {
-  private scheduleNextTaskTimer: NodeJS.Timeout | null = null
-  private POLLING_INTERVAL_MS = 15 * 1000
-  updateInterval(time: number = 15 * 1000) {
-    this.POLLING_INTERVAL_MS = time
-  }
-  public scheduleNextTask<T extends (...params: any[]) => any>(immediate = false, runTasks: T) {
-    // 清除上一个定时器（如果有的话），防止重复执行
-    if (this.scheduleNextTaskTimer) {
-      clearTimeout(this.scheduleNextTaskTimer)
-    }
-
-    const run = async () => {
-      await runTasks()
-      this.scheduleNextTaskTimer = setTimeout(run, this.POLLING_INTERVAL_MS)
-    }
-
-    if (immediate) {
-      run()
-    } else {
-      // 正常调度
-      this.scheduleNextTaskTimer = setTimeout(run, this.POLLING_INTERVAL_MS)
-    }
-  }
-  public stopScheduleNextTask() {
-    if (this.scheduleNextTaskTimer) {
-      clearTimeout(this.scheduleNextTaskTimer)
-      this.scheduleNextTaskTimer = null
-    }
-  }
-}
 
 class ScreenMonitorTask extends ScheduleNextTask {
   static globalStatus: 'running' | 'stopped' = 'stopped'
   private status: 'running' | 'stopped' = 'stopped'
   private appInfo: CaptureSource[] = []
   private configCache: AutoRefreshCache<CaptureSource[]> | null = null
-  private modelConfig: Record<string, unknown> = {}
+  private modelConfig: Partial<ScreenSettings> = {}
+
   constructor() {
     super()
   }
@@ -83,9 +56,9 @@ class ScreenMonitorTask extends ScheduleNextTask {
       this.appInfo = uniqBy([...this.appInfo, ...appInfo], 'id')
       this.configCache?.triggerUpdate(true)
     })
-    ipcMain.handle(IpcChannel.Task_Update_Model_Config, (_, config: Record<string, unknown>) => {
+    ipcMain.handle(IpcChannel.Task_Update_Model_Config, (_, config: ScreenSettings) => {
       this.modelConfig = config
-      this.updateInterval(config.interval as number)
+      this.updateInterval(config.recordInterval * 1000)
     })
     ipcMain.handle(IpcChannel.Task_Start, () => {
       logger.info('render notify ScreenMonitorTask start')
@@ -163,8 +136,7 @@ class ScreenMonitorTask extends ScheduleNextTask {
     }
   }
   private async handleScreenshotTask(source: CaptureSource, createTime: Dayjs) {
-    const groupIntervalTime = createTime.format('HH-mm-ss')
-    const res = await screenshotService.takeScreenshot(groupIntervalTime, source.id)
+    const res = await screenshotService.takeScreenshot(source.id, createTime)
 
     if (res.success) {
       logger.info(`Screenshot taken successfully for source ${source.id}`)
@@ -179,7 +151,7 @@ class ScreenMonitorTask extends ScheduleNextTask {
   private async startScreenMonitor() {
     try {
       const visibleSources = this.configCache?.get()
-      logger.info(
+      logger.debug(
         'visibleSources',
         visibleSources?.map((item) => pick(item, ['name', 'type', 'isVisible']))
       )
@@ -194,7 +166,7 @@ class ScreenMonitorTask extends ScheduleNextTask {
       }
 
       const sources = this.appInfo.filter((source) => ids.includes(source.id))
-      logger.info(
+      logger.debug(
         'sources',
         sources.map((v) => pick(v, ['name', 'type']))
       )
@@ -202,7 +174,7 @@ class ScreenMonitorTask extends ScheduleNextTask {
       sources.forEach((source) => {
         queue.add(() => this.handleScreenshotTask(source, createTime))
       })
-      logger.info(`Queue has ${queue.size} tasks. Waiting for idle...`)
+      logger.debug(`Queue has ${queue.size} tasks. Waiting for idle...`)
       // await queue.onIdle()
       // logger.info('All screenshot tasks have completed.')
     } catch (error) {
@@ -284,4 +256,3 @@ class ScreenMonitorTask extends ScheduleNextTask {
   }
 }
 export { ScreenMonitorTask }
-

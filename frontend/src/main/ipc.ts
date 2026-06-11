@@ -34,11 +34,17 @@ import { updateAppDataConfig } from './utils/init'
 import { localStoreService } from './services/LocalStoreService'
 import { activityService } from './services/ActivityService'
 import { IpcServerPushChannel } from '@shared/ipc-server-push-channel'
+import { VaultDocumentType } from '@shared/enums/global-enum'
+import { getTrayService } from './index'
+import { type Dayjs } from 'dayjs'
+import AppUpdater from './services/AppUpdater'
+import { HeatmapService } from './services/HeatmapService'
 
 const logger = getLogger('IPC')
 
 export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
   const notificationService = new NotificationService(mainWindow)
+  const appUpdater = new AppUpdater(mainWindow)
 
   // Backend 服务相关
   // ipcMain.handle(IpcChannel.Backend_GetPort, () => {
@@ -84,6 +90,14 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
 
   ipcMain.handle(IpcChannel.App_Reload, () => mainWindow.reload())
   ipcMain.handle(IpcChannel.Open_Website, (_, url: string) => shell.openExternal(url))
+  // check for update
+  ipcMain.handle(IpcChannel.App_CheckForUpdate, async () => {
+    return await appUpdater.checkForUpdates()
+  })
+  ipcMain.handle(IpcChannel.App_DownloadUpdate, () => appUpdater.downloadUpdate())
+  // Update
+  ipcMain.handle(IpcChannel.App_QuitAndInstall, () => appUpdater.quitAndInstall())
+  ipcMain.handle(IpcChannel.App_CancelDownload, () => appUpdater.cancelDownload())
 
   // launch on boot
   ipcMain.handle(IpcChannel.App_SetLaunchOnBoot, (_, isLaunchOnBoot: boolean) => {
@@ -350,9 +364,9 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
 
   // Database (better-sqlite3 同步操作)
   // 数据库相关的IPC处理器
-  ipcMain.handle(IpcChannel.Database_GetAllVaults, async (_, type: string = 'vaults') => {
+  ipcMain.handle(IpcChannel.Database_GetAllVaults, async () => {
     await ensureDbInitialized()
-    return db.getVaults(type)
+    return db.getVaults()
   })
 
   ipcMain.handle(IpcChannel.Database_GetVaultsByParentId, async (_, parentId: number) => {
@@ -410,6 +424,11 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
   ipcMain.handle(IpcChannel.Database_RestoreVaultById, async (_, id: number) => {
     await ensureDbInitialized()
     return db.restoreVaultById(id)
+  })
+
+  ipcMain.handle(IpcChannel.Database_GetVaultsByDocumentType, async (_, documentType: VaultDocumentType) => {
+    await ensureDbInitialized()
+    return db.getVaultsByDocumentType(documentType)
   })
 
   // activity
@@ -475,8 +494,8 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
     screenshotService.openPrefs()
   })
 
-  ipcMain.handle(IpcChannel.Screen_Monitor_Take_Screenshot, (_, groupIntervalTime: string, sourceId: string) =>
-    screenshotService.takeScreenshot(groupIntervalTime, sourceId)
+  ipcMain.handle(IpcChannel.Screen_Monitor_Take_Screenshot, (_, sourceId: string, batchTime: Dayjs) =>
+    screenshotService.takeScreenshot(sourceId, batchTime)
   )
 
   ipcMain.handle(IpcChannel.Screen_Monitor_Take_Source_Screenshot, (_, sourceId: string) =>
@@ -532,4 +551,59 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
     return localStoreService.setSetting(key, value)
   })
   ipcMain.handle(IpcChannel.Screen_Monitor_Clear_Settings, (_, key: string) => localStoreService.clearSetting(key))
+
+  // Tray related handlers
+  ipcMain.handle(IpcChannel.Tray_UpdateRecordingStatus, (_, isRecording: boolean) => {
+    const trayService = getTrayService()
+    if (trayService) {
+      trayService.updateRecordingStatus(isRecording)
+      logger.info(`Tray recording status updated: ${isRecording}`)
+    } else {
+      logger.warn('Tray service not available')
+    }
+  })
+
+  ipcMain.handle(IpcChannel.Tray_Show, () => {
+    const trayService = getTrayService()
+    if (trayService && !trayService.exists()) {
+      trayService.create()
+      logger.info('Tray shown')
+    }
+  })
+
+  ipcMain.handle(IpcChannel.Tray_Hide, () => {
+    const trayService = getTrayService()
+    if (trayService) {
+      trayService.destroy()
+      logger.info('Tray hidden')
+    }
+  })
+
+  // Get recording statistics
+  ipcMain.handle(IpcChannel.Screen_Monitor_Get_Recording_Stats, async () => {
+    try {
+      const backendPort = getBackendPort()
+      const url = `http://127.0.0.1:${backendPort}/api/monitoring/recording-stats`
+
+      const response = await fetch(url, {
+        headers: {
+          'X-Auth-Token': 'minecontext_frontend_token'
+        }
+      })
+
+      if (!response.ok) {
+        logger.error(`Failed to get recording stats: HTTP ${response.status}`)
+        return null
+      }
+
+      const result = await response.json()
+      return result.success ? result.data : null
+    } catch (error) {
+      logger.error('Failed to get recording stats:', error)
+      return null
+    }
+  })
+  ipcMain.handle(IpcChannel.Get_Heatmap_Data, async (_, startTime: number, endTime: number) => {
+    return HeatmapService.getHeatmapData(startTime, endTime)
+  })
 }

@@ -1,6 +1,6 @@
 {
   "name": "OwlContext",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "An Electron application with React and TypeScript",
   "main": "./out/main/index.js",
   "author": "example.com",
@@ -31,6 +31,7 @@
     "build:win": "npm run copy-backend && npm run build && electron-builder --win",
     "build:mac": "npm run copy-backend && npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
+    "publish": "npm run copy-backend && npm run build && electron-builder --mac --win -p always",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "copy-backend": "node scripts/copy-prebuilt-backend.js",
     "electron-pack": "npm run build && electron-builder --mac"
@@ -38,6 +39,7 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^1.0.14",
     "@ai-sdk/react": "^2.0.30",
+    "@arco-design/color": "0.4.0",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@radix-ui/react-avatar": "^1.1.10",
@@ -48,6 +50,7 @@
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
+    "@zhongyao/heatmap": "^0.0.6",
     "ahooks": "^3.9.5",
     "ai": "^5.0.30",
     "allotment": "^1.20.4",
@@ -79,10 +82,11 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@arco-design/web-react": "^2.66.4",
+    "@arco-design/web-react": "latest",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@electron/notarize": "^2.5.0",
     "@milkdown/crepe": "^7.15.5",
     "@milkdown/kit": "^7.15.5",
     "@milkdown/react": "^7.15.5",

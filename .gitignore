@@ -5,16 +5,27 @@ __pycache__
 /screenshots
 /logs
 /persist
+/debug
 /dist/*
 /venv/*
 /test_storage
 /config/runtime
 /test_script
-/config/user_setting.yaml
+/config/user*
 .DS_Store
 
 .venv/
 uv.lock
+uv.toml
+.idea
+
+# ide config file
+.trae
+# claude code
+.claude/
+# gemini cli
+GEMINI.md
+.gemini/
 
 # 构建产物和安装包（超大文件，不入库）
 /build-output/

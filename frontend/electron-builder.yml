@@ -12,31 +12,36 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 extraResources:
-  # Package all backend resources as-is
-  - from: resources/backend/
+  - from: backend/
     to: backend/
     filter:
       - '**/*'
-  # Optional Python helpers; comment these back in after they are built
-  # - from: externals/python/window_inspector/dist/window_inspector/window_inspector
-  #   to: bin/window_inspector
-  # - from: externals/python/window_capture/dist/window_capture/window_capture
-  #   to: bin/window_capture
 asarUnpack:
   - resources/**
 win:
   executableName: OwlContext
-  icon: build/icon.png
+  icon: build/icon.ico
   sign: false
   verifyUpdateCodeSignature: false
-  # Windows file version (will be auto-converted from 0.1.2 to 0.1.2.0)
   # If rcedit still fails, try running as administrator or closing file explorer
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
+  differentialPackage: false
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  include: build/installer.nsh
 mac:
+  extraResources:
+    - from: externals/python/window_inspector/dist/window_inspector/window_inspector
+      to: bin/window_inspector
+    - from: externals/python/window_capture/dist/window_capture/window_capture
+      to: bin/window_capture
   entitlementsInherit: build/entitlements.mac.plist
   icon: build/icon.icns
   extendInfo:
@@ -62,8 +67,10 @@ buildDependenciesFromSource: false
 # Note: Disabling ASAR would change app structure, so we keep it enabled
 # The integrity check modification step may fail if OwlContext.exe is locked
 # Make sure to run clean-build.bat before building
+afterSign: build/notarize.js
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: chenyujing1234-netizen
+  repo: OwlContext
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

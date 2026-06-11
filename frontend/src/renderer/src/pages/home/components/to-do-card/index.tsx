@@ -13,20 +13,23 @@ import {
   Space,
   Typography,
   Tree,
-  Form
+  Form,
+  Tooltip
 } from '@arco-design/web-react'
-import { IconDelete, IconEdit } from '@arco-design/web-react/icon'
-import { Task, useHomeInfo } from '@renderer/hooks/useHomeInfo'
-import { useRef, useState } from 'react'
+import { IconDelete } from '@arco-design/web-react/icon'
+import { Task, useHomeInfo } from '@renderer/hooks/use-home-info'
+import { FC, useEffect, useMemo, useRef, useState } from 'react'
 import taskEmpty from '@renderer/assets/images/task-empty.svg'
 import addIcon from '@renderer/assets/icons/add.svg'
-import { useInitPrepareData } from '@renderer/hooks/use-init-prepera-data'
+import copyIcon from '@renderer/assets/images/copy.svg'
+import { useInitPrepareData } from '@renderer/hooks/use-init-prepare-data'
 import { TaskUrgency, TODO_LIST_STATUS } from '@renderer/constant/feed'
 import { useMemoizedFn } from 'ahooks'
 import highPriorityIcon from '@renderer/assets/icons/high-priority.svg'
 import mediumPriorityIcon from '@renderer/assets/icons/medium-priority.svg'
 import lowPriorityIcon from '@renderer/assets/icons/low-priority.svg'
 import doneIcon from '@renderer/assets/icons/done.svg'
+import dayjs from 'dayjs'
 
 const { Text } = Typography
 const TextArea = Input.TextArea
@@ -61,24 +64,32 @@ function genTodoTitle(urgency: TaskUrgency) {
       return 'Unknown Priority'
   }
 }
-
-const ToDoCard: React.FC = () => {
-  const { tasks, toggleTaskStatus, updateTask, deleteTask, addTask } = useHomeInfo()
-  const hasTasks = tasks.length > 0
+export interface ToDoCardProps {
+  selectedDays: string | null
+}
+const ToDoCard: FC<ToDoCardProps> = (props) => {
+  const { selectedDays } = props
+  const { tasks, toggleTaskStatus, updateTask, deleteTask, addTask, fetchTasks } = useHomeInfo()
+  const hasTasks = useMemo(() => tasks.length > 0, [tasks])
   const [isTaskHover, setIsTaskHover] = useState<number | null>(null) // Edit task status
   const [isDeleting, setIsDeleting] = useState(false)
+  const [copiedTaskId, setCopiedTaskId] = useState<number | null>(null) // Copied tooltip state
   const { deleteTodoList, data: todoListInitData } = useInitPrepareData()
   const [form] = Form.useForm()
-  const filterDoneTasks = tasks.map((task) => {
-    // After a task is done, its urgency becomes -1
-    if (task.status === 1) {
-      return {
-        ...task,
-        urgency: TaskUrgency.Done
-      }
-    }
-    return task
-  })
+  const filterDoneTasks = useMemo(
+    () =>
+      tasks.map((task) => {
+        // Set urgency to done when task is done
+        if (task.status === 1) {
+          return {
+            ...task,
+            urgency: TaskUrgency.Done
+          }
+        }
+        return task
+      }),
+    [tasks]
+  )
 
   // Handle deleting a task
   const handleDeleteTask = useMemoizedFn(async (taskId: number) => {
@@ -95,6 +106,22 @@ const ToDoCard: React.FC = () => {
     }
   })
 
+  const handleCopyContent = useMemoizedFn(async (content: string, taskId: number) => {
+    try {
+      await navigator.clipboard.writeText(content)
+
+      // Show tooltip
+      setCopiedTaskId(taskId)
+
+      // Hide tooltip after 2 seconds
+      setTimeout(() => {
+        setCopiedTaskId(null)
+      }, 2000)
+    } catch (error) {
+      Message.error('Failed to copy content')
+    }
+  })
+
   const renderTask = (task) => (
     <div
       key={task.id}
@@ -108,24 +135,27 @@ const ToDoCard: React.FC = () => {
         }
       }}>
       <div className="gap-2 flex-1 flex items-center">
-        <Radio checked={!!task.status} onClick={() => handleToggleTaskStatus(task)} />
+        <Radio className="self-start mt-0.5" checked={!!task.status} onClick={() => handleToggleTaskStatus(task)} />
         <div
-          className={`font-roboto text-sm font-normal text-[#3F3F51] leading-[22px] max-w-[800px] tracking-[0.042px] whitespace-normal break-words ${task.status && 'line-through'}`}>
+          className={`font-roboto text-sm font-normal text-[#3F3F51] leading-[22px] max-w-[800px] tracking-[0.042px] whitespace-normal break-words ${task.status && 'line-through'}`}
+          onClick={() => handleEditToDoList(task)}>
           {task.content}
         </div>
       </div>
-      <div className={`flex items-center gap-2 ${isTaskHover === task.id ? 'opacity-100' : 'opacity-0'}`}>
-        <Button
-          type="text"
-          size="small"
-          icon={<IconEdit />}
-          onClick={() => handleEditToDoList(task)}
-          style={{ color: '#165dff' }}
-          disabled={!!task.status}
-        />
+      <div className={`flex items-center ml-2 gap-3 ${isTaskHover === task.id ? 'opacity-100' : 'opacity-0'}`}>
+        <Tooltip content="Copied!" position="top" popupVisible={copiedTaskId === task.id}>
+          <Button
+            type="text"
+            size="small"
+            className="[&_.arco-btn-size-small]: !w-[14px] !h-[14px]"
+            icon={<img src={copyIcon} alt="copyIcon" className="w-[14px] h-[14px]" />}
+            onClick={() => handleCopyContent(task.content, task.id)}
+            disabled={!!task.status}
+          />
+        </Tooltip>
         <Popconfirm
           title="Confirm delete"
-          content="Confirm to delete this task?"
+          content="Confirm to delete this todo?"
           onOk={() => handleDeleteTask(task.id)}
           onCancel={() => {
             setIsDeleting(false)
@@ -143,6 +173,7 @@ const ToDoCard: React.FC = () => {
             type="text"
             size="small"
             icon={<IconDelete />}
+            className="[&_.arco-btn-size-small]: !w-[13px] !h-[13px]"
             style={{ color: '#f53f3f' }}
             onClick={() => {
               setIsDeleting(true)
@@ -237,7 +268,7 @@ const ToDoCard: React.FC = () => {
   const timer = useRef<NodeJS.Timeout>(null)
   const handleToggleTaskStatus = useMemoizedFn(async (task) => {
     let id = task.id
-    console.log('id --->', id)
+
     if (todoListInitData.some((v) => v.id === task.id)) {
       deleteTodoList(task.id)
       id = await addTask({
@@ -245,7 +276,6 @@ const ToDoCard: React.FC = () => {
         urgency: task.urgency,
         status: 0
       })
-      console.log('id --->', id)
     }
     timer.current = setTimeout(() => {
       toggleTaskStatus(id)
@@ -309,6 +339,13 @@ const ToDoCard: React.FC = () => {
     }
   })
 
+  useEffect(() => {
+    // Need to refresh the task list after clicking a date on the heatmap
+    if (selectedDays) {
+      fetchTasks(dayjs(selectedDays))
+    }
+  }, [selectedDays])
+
   return (
     <>
       <Card
@@ -320,7 +357,7 @@ const ToDoCard: React.FC = () => {
           <div className="flex flex-1 justify-between items-center w-full">
             <Space style={{ marginTop: 5 }}>
               <div className="flex px-[2px] justify-center items-center gap-[4px] rounded-[2px] bg-gradient-to-l from-[rgba(239,251,248,0.5)] to-[#F5FBEF]">
-                <div className="mr-[0.3em] font-['Byte Sans'] text-[15px] font-extralight leading-[22px] tracking-[0.045px] bg-gradient-to-l from-[#007740] to-[#D0B400] bg-clip-text text-transparent">
+                <div className="mr-[0.3em] font-['Roboto'] text-[15px] font-extralight leading-[22px] tracking-[0.045px] bg-gradient-to-l from-[#007740] to-[#D0B400] bg-clip-text text-transparent">
                   Todo
                 </div>
               </div>
@@ -343,8 +380,8 @@ const ToDoCard: React.FC = () => {
           {hasTasks ? (
             <div>{buildTodoTree([...(todoListInitData as any), ...filterDoneTasks])}</div>
           ) : (
-            <div className="empty-state">
-              <img src={taskEmpty} alt="empty" />
+            <div className="flex flex-col items-center justify-center pt-[60px] pb-[60px] text-center">
+              <img src={taskEmpty} alt="empty" className="w-20 h-20 mb-4" />
               <Text type="secondary">Update at 8 am everyday</Text>
             </div>
           )}
@@ -352,7 +389,7 @@ const ToDoCard: React.FC = () => {
       </Card>
       {/* Edit task modal */}
       <Modal
-        title={status === TODO_LIST_STATUS.Create ? 'Add todo' : 'Edit todo task'}
+        title={status === TODO_LIST_STATUS.Create ? 'Add todo' : 'Edit todo'}
         visible={visible}
         onOk={handleSave}
         onCancel={() => setVisible(false)}
